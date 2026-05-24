@@ -1,0 +1,52 @@
+# ── FlowAI CRM — WhatsApp Worker ─────────────────────────────────────────────
+# Multi-stage build: deps → builder → runner
+# Target runtime: Node.js 22 Alpine (small image, fast cold start)
+
+FROM node:22-alpine AS deps
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+
+# ─────────────────────────────────────────────────────────────────────────────
+FROM node:22-alpine AS builder
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY tsconfig.json .
+COPY workers/tsconfig.json ./workers/
+COPY lib/ ./lib/
+COPY types/ ./types/
+COPY workers/ ./workers/
+
+# Type-check worker bundle
+RUN npx tsc --project workers/tsconfig.json --noEmit
+
+# ─────────────────────────────────────────────────────────────────────────────
+FROM node:22-alpine AS runner
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV TZ=UTC
+
+# Only production dependencies
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=builder /app/package.json .
+COPY --from=builder /app/tsconfig.json .
+COPY --from=builder /app/lib/ ./lib/
+COPY --from=builder /app/types/ ./types/
+COPY --from=builder /app/workers/ ./workers/
+
+# tsx is used to run TypeScript directly (no compile step in production)
+# It's in node_modules from the deps stage since bullmq/ioredis are prod deps
+RUN npm install -g tsx
+
+# Health check — can be extended to check Redis connectivity
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD node -e "require('ioredis'); console.log('ok')" || exit 1
+
+USER node
+
+CMD ["tsx", "--tsconfig", "workers/tsconfig.json", "workers/worker.ts"]

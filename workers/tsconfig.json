@@ -1,0 +1,25 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ES2022",
+    "outDir": "../dist/workers",
+    "rootDir": "..",
+    "noEmit": false,
+    "paths": {
+      "@/*": ["../*"]
+    }
+  },
+  "include": [
+    "../workers/**/*.ts",
+    "../lib/**/*.ts",
+    "../types/**/*.ts"
+  ],
+  "exclude": [
+    "../node_modules",
+    "../.next",
+    "../app/**/*.tsx",
+    "../components/**/*.tsx"
+  ]
+}

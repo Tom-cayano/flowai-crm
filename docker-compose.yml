@@ -1,0 +1,102 @@
+# FlowAI CRM — Docker Compose
+#
+# Services:
+#   redis     — BullMQ job queue + rate-limit store
+#   worker    — WhatsApp background engine
+#   app       — Next.js frontend (optional; use Vercel in production)
+#
+# Usage:
+#   Development:  docker compose up redis worker
+#   Full stack:   docker compose up
+#
+# Required .env file (copy from .env.local):
+#   REDIS_URL, NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
+#   EVOLUTION_SERVER_URL, EVOLUTION_API_KEY, EVOLUTION_WEBHOOK_SECRET
+
+version: "3.9"
+
+volumes:
+  redis_data:
+
+networks:
+  flowai:
+    driver: bridge
+
+# ─── Services ─────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── Redis — job queue + sliding-window rate limiter ─────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: >
+      redis-server
+      --save 60 1
+      --loglevel warning
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - flowai
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Worker — WhatsApp engine (BullMQ consumer) ───────────────────────────────
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env.local
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - NODE_ENV=production
+      # Worker-level tuning (override in .env.local if needed)
+      - WORKER_CONCURRENCY_MESSAGE=5
+      - WORKER_CONCURRENCY_OUTBOUND=2
+      - WORKER_CONCURRENCY_MEDIA=3
+      - SESSION_HEALTH_INTERVAL_MS=300000
+      # Anti-ban defaults
+      - WPP_RATE_PER_MINUTE=20
+      - WPP_RATE_PER_DAY=500
+      - WPP_WARMUP_MAX_DAILY=30
+    networks:
+      - flowai
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── App — Next.js (only needed for full-stack local dev) ────────────────────
+  # In production, deploy the Next.js app to Vercel and run only redis + worker.
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env.local
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - NODE_ENV=production
+    ports:
+      - "3000:3000"
+    networks:
+      - flowai
+    profiles:
+      - fullstack  # only starts with: docker compose --profile fullstack up

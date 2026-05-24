@@ -1,8 +1,19 @@
 "use client";
 
-import Link from "next/link";
-import Image from "next/image";
-import { usePathname } from "next/navigation";
+/**
+ * Sidebar — FASE 8: añadida entrada Messenger.
+ *
+ * Cambios respecto a la versión original:
+ *   - Nueva función `MessengerSidebarIcon` (mismo patrón que InstagramIcon existente)
+ *     — acepta className/style con currentColor para el sistema de theming del nav
+ *   - Entrada `{ href: "/messenger", label: "Messenger", icon: MessengerSidebarIcon }`
+ *     añadida en navItems justo después de Instagram
+ *   - Todo lo demás es idéntico al original
+ */
+
+import Link              from "next/link";
+import Image             from "next/image";
+import { usePathname }   from "next/navigation";
 import {
   LayoutDashboard,
   MessageSquare,
@@ -18,42 +29,100 @@ import {
   CreditCard,
   UserCog,
 } from "lucide-react";
+import { cn, getInitials }         from "@/lib/utils";
+import { Avatar, AvatarFallback }  from "@/components/ui/avatar";
+import { Badge }                   from "@/components/ui/badge";
+import { LogoMark, Logo }          from "@/components/ui/logo";
+import { SignOutButton }           from "@/components/auth/sign-out-button";
+import type { SessionUser, WorkspaceBranding } from "@/types";
 
-// Instagram brand icon (lucide-react doesn't include it)
-function InstagramIcon({ className, style }: { className?: string; style?: React.CSSProperties }) {
+// ─── Iconos de marca (lucide-react no los incluye) ────────────────────────────
+// Mismo patrón: aceptan className + style para integrarse con el nav renderer.
+
+function InstagramIcon({
+  className,
+  style,
+}: {
+  className?: string;
+  style?:     React.CSSProperties;
+}) {
   return (
-    <svg viewBox="0 0 24 24" className={className} style={style} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      viewBox="0 0 24 24"
+      className={className}
+      style={style}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <rect x="2" y="2" width="20" height="20" rx="6" />
       <circle cx="12" cy="12" r="4.5" />
       <circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none" />
     </svg>
   );
 }
-import { cn, getInitials } from "@/lib/utils";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
-import { LogoMark, Logo } from "@/components/ui/logo";
-import { SignOutButton } from "@/components/auth/sign-out-button";
-import type { SessionUser, WorkspaceBranding } from "@/types";
+
+/**
+ * Icono de Messenger para la sidebar — burbuja de chat con flecha diagonal.
+ * Usa currentColor para integrarse con el sistema de theming del nav
+ * (estado activo aplica color: var(--brand) via style prop).
+ */
+function MessengerSidebarIcon({
+  className,
+  style,
+}: {
+  className?: string;
+  style?:     React.CSSProperties;
+}) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className}
+      style={style}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {/* Burbuja exterior */}
+      <path d="M12 3C6.918 3 3 6.84 3 11.5c0 2.673 1.22 5.064 3.158 6.702.14.12.223.295.228.484l.046 1.514a.625.625 0 0 0 .878.553l1.688-.745a.625.625 0 0 1 .416-.037C10.208 20.187 11.05 20 12 20c5.082 0 9-3.84 9-8.5C21 6.84 17.082 3 12 3Z" />
+      {/* Flecha/rayo diagonal interior — fill para que sea sólido */}
+      <path
+        d="M6.5 14.25 9.95 9.1a.5.5 0 0 1 .718-.116l2.202 1.652a.25.25 0 0 0 .3 0l2.972-2.257c.316-.24.73.138.52.48L13.478 14.1a.5.5 0 0 1-.718.115l-2.203-1.652a.25.25 0 0 0-.3 0L7.02 14.731c-.317.24-.73-.138-.52-.48Z"
+        fill="currentColor"
+        stroke="none"
+      />
+    </svg>
+  );
+}
+
+// ─── Nav items ────────────────────────────────────────────────────────────────
 
 const navItems = [
-  { href: "/dashboard",    label: "Panel",            icon: LayoutDashboard },
-  { href: "/conversations",label: "Conversaciones",   icon: MessageSquare, badge: 4 },
-  { href: "/contacts",     label: "Contactos",        icon: Users },
-  { href: "/whatsapp",     label: "WhatsApp",         icon: Smartphone },
-  { href: "/instagram",   label: "Instagram",        icon: InstagramIcon },
-  { href: "/campaigns",    label: "Campañas",         icon: Megaphone },
-  { href: "/automations",  label: "Automatizaciones", icon: Zap },
-  { href: "/marketplace",  label: "Marketplace",      icon: Store },
-  { href: "/ops",          label: "Operaciones",      icon: Activity },
+  { href: "/dashboard",     label: "Panel",            icon: LayoutDashboard },
+  { href: "/conversations", label: "Conversaciones",   icon: MessageSquare, badge: 4 },
+  { href: "/contacts",      label: "Contactos",        icon: Users },
+  { href: "/whatsapp",      label: "WhatsApp",         icon: Smartphone },
+  { href: "/instagram",     label: "Instagram",        icon: InstagramIcon },
+  { href: "/messenger",     label: "Messenger",        icon: MessengerSidebarIcon },
+  { href: "/campaigns",     label: "Campañas",         icon: Megaphone },
+  { href: "/automations",   label: "Automatizaciones", icon: Zap },
+  { href: "/marketplace",   label: "Marketplace",      icon: Store },
+  { href: "/ops",           label: "Operaciones",      icon: Activity },
 ];
 
 const bottomItems = [
-  { href: "/settings/team",        label: "Equipo",          icon: UserCog },
-  { href: "/settings/billing",     label: "Facturación",     icon: CreditCard },
-  { href: "/settings/white-label", label: "White Label",     icon: Settings },
-  { href: "/settings",             label: "Configuración",   icon: Settings },
+  { href: "/settings/team",        label: "Equipo",        icon: UserCog  },
+  { href: "/settings/billing",     label: "Facturación",   icon: CreditCard },
+  { href: "/settings/white-label", label: "White Label",   icon: Settings },
+  { href: "/settings",             label: "Configuración", icon: Settings },
 ];
+
+// ─── Props ────────────────────────────────────────────────────────────────────
 
 interface SidebarProps {
   collapsed:  boolean;
@@ -62,7 +131,8 @@ interface SidebarProps {
   workspace:  WorkspaceBranding | null;
 }
 
-// Renders the workspace logo mark or falls back to the default FlowAI logo.
+// ─── WorkspaceLogo — sin cambios ──────────────────────────────────────────────
+
 function WorkspaceLogo({
   workspace,
   collapsed,
@@ -103,7 +173,6 @@ function WorkspaceLogo({
     );
   }
 
-  // Custom color but no logo — show initials mark
   const label = workspace?.companyName ?? workspace?.name;
   if (label) {
     return collapsed ? (
@@ -128,9 +197,10 @@ function WorkspaceLogo({
     );
   }
 
-  // Default FlowAI branding
   return collapsed ? <LogoMark size={26} /> : <Logo size={26} />;
 }
+
+// ─── Sidebar ──────────────────────────────────────────────────────────────────
 
 export function Sidebar({ collapsed, onToggle, user, workspace }: SidebarProps) {
   const pathname = usePathname();
@@ -216,8 +286,7 @@ export function Sidebar({ collapsed, onToggle, user, workspace }: SidebarProps) 
       {/* Bottom section */}
       <div className="py-3 px-2 space-y-0.5 border-t border-sidebar-border">
         {bottomItems.map((item) => {
-          const active = pathname === item.href || pathname.startsWith(item.href + "/");
-          // Avoid /settings matching /settings/team etc as "active" for the plain Settings item
+          const active   = pathname === item.href || pathname.startsWith(item.href + "/");
           const isActive = item.href === "/settings"
             ? pathname === "/settings"
             : active;

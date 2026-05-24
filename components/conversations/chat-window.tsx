@@ -1,5 +1,15 @@
 "use client";
 
+/**
+ * ChatWindow — FASE 6: añadido ChannelBadge en el header.
+ *
+ * Cambio respecto a la versión original:
+ *   - Importa ChannelBadge desde @/components/ui/channel-badge
+ *   - Renderiza <ChannelBadge variant="icon" size="sm"> junto al nombre del
+ *     contacto en el header, mostrando el canal de la conversación activa
+ *   - Todo lo demás es idéntico al original — lógica de envío, scroll, IA, etc.
+ */
+
 import {
   useRef,
   useEffect,
@@ -21,12 +31,13 @@ import {
   ChevronUp,
   Sparkles,
 } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
+import { motion, AnimatePresence }  from "framer-motion";
+import { Avatar, AvatarFallback }   from "@/components/ui/avatar";
+import { Button }                   from "@/components/ui/button";
+import { Textarea }                 from "@/components/ui/textarea";
+import { Badge }                    from "@/components/ui/badge";
+import { Skeleton }                 from "@/components/ui/skeleton";
+import { ChannelBadge }             from "@/components/ui/channel-badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -34,35 +45,35 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { MessageBubble } from "./message-bubble";
-import { TypingIndicator } from "./typing-indicator";
-import { AgentAssigner } from "./agent-assigner";
-import { AICopilotPanel } from "./ai-copilot-panel";
-import { useInfiniteMessages } from "@/lib/hooks/use-infinite-messages";
-import { useTypingIndicator } from "@/lib/hooks/use-typing-indicator";
+import { MessageBubble }            from "./message-bubble";
+import { TypingIndicator }          from "./typing-indicator";
+import { AgentAssigner }            from "./agent-assigner";
+import { AICopilotPanel }           from "./ai-copilot-panel";
+import { useInfiniteMessages }      from "@/lib/hooks/use-infinite-messages";
+import { useTypingIndicator }       from "@/lib/hooks/use-typing-indicator";
 import { sendMessage, updateConversationStatus } from "@/lib/actions/conversations";
-import { getInitials, cn } from "@/lib/utils";
+import { getInitials, cn }          from "@/lib/utils";
 import type { Conversation, ConversationStatus, Message } from "@/types";
 
 const STATUS_COLORS: Record<ConversationStatus, string> = {
-  open: "text-[#10b981] border-[#10b981]/50",
-  pending: "text-amber-400 border-amber-400/50",
+  open:     "text-[#10b981] border-[#10b981]/50",
+  pending:  "text-amber-400 border-amber-400/50",
   resolved: "text-emerald-400 border-emerald-400/50",
-  spam: "text-red-400 border-red-400/50",
+  spam:     "text-red-400 border-red-400/50",
 };
 
 const STATUS_LABELS: Record<ConversationStatus, string> = {
-  open: "Abierta",
-  pending: "Pendiente",
+  open:     "Abierta",
+  pending:  "Pendiente",
   resolved: "Resuelta",
-  spam: "Spam",
+  spam:     "Spam",
 };
 
 interface ChatWindowProps {
-  conversation: Conversation;
-  userId: string;
+  conversation:         Conversation;
+  userId:               string;
   onToggleContactPanel: () => void;
-  onBack?: () => void;
+  onBack?:              () => void;
   onConversationUpdate: (updated: Conversation) => void;
 }
 
@@ -73,13 +84,13 @@ export function ChatWindow({
   onBack,
   onConversationUpdate,
 }: ChatWindowProps) {
-  const [input, setInput] = useState("");
-  const [sending, setSending] = useState(false);
-  const [sendError, setSendError] = useState<string | null>(null);
+  const [input, setInput]           = useState("");
+  const [sending, setSending]       = useState(false);
+  const [sendError, setSendError]   = useState<string | null>(null);
   const [showCopilot, setShowCopilot] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const prevScrollHeightRef = useRef(0);
+  const bottomRef                   = useRef<HTMLDivElement>(null);
+  const scrollContainerRef          = useRef<HTMLDivElement>(null);
+  const prevScrollHeightRef         = useRef(0);
 
   const {
     messages,
@@ -97,14 +108,14 @@ export function ChatWindow({
     userId,
   });
 
-  // Scroll to bottom on initial load
+  // Scroll al fondo en carga inicial
   useEffect(() => {
     if (!isLoading) {
       bottomRef.current?.scrollIntoView({ behavior: "instant" });
     }
   }, [isLoading]);
 
-  // Scroll to bottom when new messages arrive (only if near bottom)
+  // Scroll al fondo cuando llegan mensajes nuevos (solo si estamos cerca del fondo)
   useEffect(() => {
     const container = scrollContainerRef.current;
     if (!container || isLoading) return;
@@ -115,7 +126,7 @@ export function ChatWindow({
     }
   }, [messages, isLoading]);
 
-  // Preserve scroll position when older messages are prepended (load more)
+  // Preservar posición al cargar mensajes antiguos (prepend)
   useLayoutEffect(() => {
     const container = scrollContainerRef.current;
     if (!container || !isLoadingMore) return;
@@ -123,14 +134,12 @@ export function ChatWindow({
     if (delta > 0) container.scrollTop += delta;
   }, [isLoadingMore, messages]);
 
-  // Capture scroll height before loadMore re-render
   const handleLoadMore = useCallback(() => {
     const container = scrollContainerRef.current;
     if (container) prevScrollHeightRef.current = container.scrollHeight;
     loadMore();
   }, [loadMore]);
 
-  // Detect scroll to top → load more
   const handleScroll = useCallback(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
@@ -139,7 +148,7 @@ export function ChatWindow({
     }
   }, [hasMore, isLoadingMore, handleLoadMore]);
 
-  // ── Send message ─────────────────────────────────────────────────────────
+  // ── Enviar mensaje ────────────────────────────────────────────────────────
   const handleSend = useCallback(async () => {
     const content = input.trim();
     if (!content || sending) return;
@@ -150,13 +159,13 @@ export function ChatWindow({
 
     const tempId = `temp-${Date.now()}`;
     const tempMsg: Message = {
-      id: tempId,
+      id:             tempId,
       conversationId: conversation.id,
       content,
-      type: "text",
-      sender: "agent",
-      status: "sent",
-      timestamp: new Date().toISOString(),
+      type:           "text",
+      sender:         "agent",
+      status:         "sent",
+      timestamp:      new Date().toISOString(),
     };
     addOptimistic(tempMsg);
 
@@ -170,14 +179,7 @@ export function ChatWindow({
     }
 
     setSending(false);
-  }, [
-    input,
-    sending,
-    conversation.id,
-    addOptimistic,
-    confirmOptimistic,
-    removeOptimistic,
-  ]);
+  }, [input, sending, conversation.id, addOptimistic, confirmOptimistic, removeOptimistic]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -228,10 +230,16 @@ export function ChatWindow({
             )}
           </div>
           <div>
+            {/* Nombre + badge de canal + badge de estado */}
             <div className="flex items-center gap-2">
-              <h3 className="text-sm font-semibold text-foreground">
-                {contactName}
-              </h3>
+              <h3 className="text-sm font-semibold text-foreground">{contactName}</h3>
+              {/* Badge de canal — icono sutil junto al nombre */}
+              <ChannelBadge
+                channel={conversation.channel}
+                variant="icon"
+                size="md"
+                id={`header-${conversation.id}`}
+              />
               <Badge
                 variant="outline"
                 className={cn("text-[10px] h-4 px-1.5", STATUS_COLORS[status])}
@@ -319,13 +327,12 @@ export function ChatWindow({
         </div>
       </div>
 
-      {/* ── Messages area ── */}
+      {/* ── Área de mensajes ── */}
       <div
         ref={scrollContainerRef}
         onScroll={handleScroll}
         className="flex-1 overflow-y-auto px-5 py-4 space-y-3"
       >
-        {/* Load more button / spinner */}
         {hasMore && (
           <div className="flex justify-center pb-2">
             {isLoadingMore ? (
@@ -345,13 +352,8 @@ export function ChatWindow({
         {isLoading ? (
           <div className="space-y-4">
             {Array.from({ length: 5 }).map((_, i) => (
-              <div
-                key={i}
-                className={cn("flex", i % 2 === 0 ? "justify-start" : "justify-end")}
-              >
-                <Skeleton
-                  className={cn("h-10 rounded-2xl", i % 2 === 0 ? "w-52" : "w-40")}
-                />
+              <div key={i} className={cn("flex", i % 2 === 0 ? "justify-start" : "justify-end")}>
+                <Skeleton className={cn("h-10 rounded-2xl", i % 2 === 0 ? "w-52" : "w-40")} />
               </div>
             ))}
           </div>
@@ -377,16 +379,12 @@ export function ChatWindow({
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.15 }}
               >
-                <MessageBubble
-                  message={msg}
-                  isPending={msg.id.startsWith("temp-")}
-                />
+                <MessageBubble message={msg} isPending={msg.id.startsWith("temp-")} />
               </motion.div>
             ))}
           </AnimatePresence>
         )}
 
-        {/* Typing indicator */}
         <AnimatePresence>
           {isContactTyping && (
             <motion.div
@@ -403,7 +401,7 @@ export function ChatWindow({
         <div ref={bottomRef} />
       </div>
 
-      {/* ── Send error ── */}
+      {/* ── Error de envío ── */}
       <AnimatePresence>
         {sendError && (
           <motion.div
@@ -415,10 +413,7 @@ export function ChatWindow({
             <div className="flex items-center gap-2 px-3 py-2 mb-1 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs">
               <AlertCircle className="h-3.5 w-3.5 shrink-0" />
               {sendError}
-              <button
-                className="ml-auto hover:opacity-70"
-                onClick={() => setSendError(null)}
-              >
+              <button className="ml-auto hover:opacity-70" onClick={() => setSendError(null)}>
                 ✕
               </button>
             </div>
@@ -441,7 +436,7 @@ export function ChatWindow({
         )}
       </AnimatePresence>
 
-      {/* ── Input area ── */}
+      {/* ── Input ── */}
       <div className="px-4 py-3 border-t border-border bg-card shrink-0">
         <div className="flex items-end gap-2 bg-muted rounded-xl px-3 py-2">
           <Button

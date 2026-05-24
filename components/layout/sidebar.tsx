@@ -18,6 +18,17 @@ import {
   CreditCard,
   UserCog,
 } from "lucide-react";
+
+// Instagram brand icon (lucide-react doesn't include it)
+function InstagramIcon({ className, style }: { className?: string; style?: React.CSSProperties }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} style={style} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="2" width="20" height="20" rx="6" />
+      <circle cx="12" cy="12" r="4.5" />
+      <circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
 import { cn, getInitials } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -30,6 +41,7 @@ const navItems = [
   { href: "/conversations",label: "Conversaciones",   icon: MessageSquare, badge: 4 },
   { href: "/contacts",     label: "Contactos",        icon: Users },
   { href: "/whatsapp",     label: "WhatsApp",         icon: Smartphone },
+  { href: "/instagram",   label: "Instagram",        icon: InstagramIcon },
   { href: "/campaigns",    label: "Campañas",         icon: Megaphone },
   { href: "/automations",  label: "Automatizaciones", icon: Zap },
   { href: "/marketplace",  label: "Marketplace",      icon: Store },

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { mapDbConversation, mapDbMessage } from "@/lib/conversations-mapper";
-import { enqueueOutbound } from "@/lib/queue/producers";
+import { enqueueOutbound, enqueueIGOutbound, enqueueFBOutbound } from "@/lib/queue/producers";
 import { getUserPrimaryWorkspace } from "@/lib/rbac/permissions";
 import { isWithinQuota, incrementUsage } from "@/lib/billing/usage";
 import type { Conversation, Message, ConversationStatus, MessagePage } from "@/types";
@@ -181,20 +181,66 @@ export async function sendMessage(
     .eq("id", conversationId)
     .eq("user_id", user.id);
 
-  // Fire the actual WhatsApp send through the outbound queue (non-blocking)
+  // Fire the channel-specific outbound send through the queue (non-blocking)
   void (async () => {
     try {
-      // Fetch conversation to get instance_id and contact phone
       const admin = createAdminClient();
       const { data: conv } = await admin
         .from("conversations")
-        .select("instance_id, contact_phone")
+        .select("channel, instance_id, contact_phone")
         .eq("id", conversationId)
         .single();
 
-      if (!conv?.instance_id || !conv.contact_phone) return;
+      if (!conv?.contact_phone) return;
 
-      // Fetch instance credentials (never exposed to browser)
+      // ── Instagram DM ──────────────────────────────────────────────────────
+      if (conv.channel === "instagram") {
+        const { data: thread } = await admin
+          .from("instagram_threads")
+          .select("account_id")
+          .eq("conversation_id", conversationId)
+          .maybeSingle();
+
+        if (!thread?.account_id) return;
+
+        await enqueueIGOutbound({
+          accountId:      thread.account_id,
+          userId:         user.id,
+          recipientIgId:  conv.contact_phone,
+          content:        trimmed,
+          conversationId,
+          messageId:      msg.id,
+          origin:         "manual",
+        });
+        return;
+      }
+
+      // ── Facebook Messenger ────────────────────────────────────────────────
+      if (conv.channel === "messenger") {
+        const { data: page } = await admin
+          .from("facebook_pages")
+          .select("page_id")
+          .eq("user_id", user.id)
+          .eq("is_active", true)
+          .maybeSingle();
+
+        if (!page?.page_id) return;
+
+        await enqueueFBOutbound({
+          pageId:         page.page_id,
+          userId:         user.id,
+          recipientPsid:  conv.contact_phone,
+          content:        trimmed,
+          conversationId,
+          messageId:      msg.id,
+          origin:         "manual",
+        });
+        return;
+      }
+
+      // ── WhatsApp (default) ────────────────────────────────────────────────
+      if (!conv.instance_id) return;
+
       const { data: inst } = await admin
         .from("whatsapp_instances")
         .select("instance_name, server_url, api_key")
@@ -205,16 +251,16 @@ export async function sendMessage(
 
       await enqueueOutbound({
         instanceName: inst.instance_name,
-        serverUrl: inst.server_url,
-        apiKey: inst.api_key,
-        phone: conv.contact_phone,
-        content: trimmed,
-        type: "text",
+        serverUrl:    inst.server_url,
+        apiKey:       inst.api_key,
+        phone:        conv.contact_phone,
+        content:      trimmed,
+        type:         "text",
         conversationId,
-        userId: user.id,
-        origin: "manual",
-        agentName: agentName ?? undefined,
-        messageId: msg.id,
+        userId:       user.id,
+        origin:       "manual",
+        agentName:    agentName ?? undefined,
+        messageId:    msg.id,
       });
     } catch {
       // Non-fatal — message is already in DB; the operator can retry manually

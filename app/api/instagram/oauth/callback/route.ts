@@ -128,6 +128,27 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         console.warn(`[ig-oauth] Failed to subscribe page ${page.id} to webhooks:`, err);
       }
 
+      // Persist page access token for Messenger (same encryption key as IG tokens)
+      // facebook_pages.page_id is the dedup key — upsert is safe to call on reconnect
+      try {
+        const pageTokenEnc = encryptToken(page.access_token);
+        await db.from("facebook_pages").upsert(
+          {
+            workspace_id:          workspaceId ?? user.id,
+            user_id:               user.id,
+            page_id:               page.id,
+            page_name:             page.name,
+            page_access_token_enc: pageTokenEnc,
+            is_active:             true,
+            updated_at:            new Date().toISOString(),
+          },
+          { onConflict: "workspace_id,page_id" }
+        );
+      } catch (err) {
+        // Non-fatal — Messenger will fall back to FACEBOOK_PAGE_ACCESS_TOKEN env var
+        console.warn(`[ig-oauth] Failed to upsert facebook_pages for page ${page.id}:`, err);
+      }
+
       // Upsert instagram_accounts row
       const enc = encryptToken(accessToken);
       await db.from("instagram_accounts").upsert(

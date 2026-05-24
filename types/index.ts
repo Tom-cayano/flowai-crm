@@ -56,7 +56,7 @@ export interface Conversation {
   tags: string[];
   createdAt: string;
   updatedAt: string;
-  channel: "whatsapp" | "instagram" | "email" | "sms";
+  channel: "whatsapp" | "instagram" | "messenger" | "email" | "sms";
   instanceId?: string;
 }
 

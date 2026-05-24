@@ -1,27 +1,24 @@
 // Facebook Messenger Webhook — intentionally THIN.
-// Validates signature, logs events, and returns 200 in <50ms.
-// Meta retries any non-2xx, so we never throw from the POST handler.
+// Validates HMAC signature, deduplicates by MID, and enqueues in <50ms.
+// Meta retries any non-2xx response, which would create duplicate jobs.
+// All DB writes happen in workers/processors/messenger-message.processor.ts.
 //
 // Events handled:
 //   messaging.messages          — incoming text / attachments
-//   messaging.messaging_reads   — read receipts
-//   messaging.messaging_postbacks — button / quick-reply clicks
-//   messaging.message_deliveries — delivery confirmations
+//   messaging.messaging_reads   — read receipts (ack'd, not queued)
+//   messaging.messaging_postbacks — button / quick-reply clicks (logged only)
+//   messaging.message_deliveries — delivery confirmations (ack'd, not queued)
 //
 // Security:
 //   GET  — hub.verify_token handshake (FACEBOOK_VERIFY_TOKEN)
-//   POST — X-Hub-Signature-256 HMAC-SHA256 (META_APP_SECRET)
+//   POST — X-Hub-Signature-256 HMAC-SHA256 (META_APP_SECRET via lib/messenger/client.ts)
 //
 // Already public: middleware PUBLIC_API_PREFIXES covers /api/webhook/
-//
-// TODO (Phase 5 — Messenger full integration):
-//   1. Add messenger_* DB tables (migration)
-//   2. Create BullMQ queues/producers: messengerMessage, messengerOutbound
-//   3. Create workers/processors/messenger-message.processor.ts
-//   4. Replace the console.log calls below with enqueueMessengerMessage(job)
 
-import { createHmac, timingSafeEqual } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
+import { verifyMessengerSignature } from "@/lib/messenger/client";
+import { enqueueFBMessage } from "@/lib/queue/producers";
+import type { FBMessageJob } from "@/lib/queue/types";
 
 // ─── GET — webhook verification handshake ─────────────────────────────────────
 
@@ -50,21 +47,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 // ─── POST — event ingestion ───────────────────────────────────────────────────
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  // Buffer the raw body — signature is computed over raw bytes
+  // Buffer raw body — HMAC is computed over raw bytes
   const rawBody    = await req.arrayBuffer();
   const bodyBuffer = Buffer.from(rawBody);
 
   // ── HMAC-SHA256 signature verification ───────────────────────────────────
-  const appSecret = process.env.META_APP_SECRET ?? "";
-  if (!appSecret) {
-    console.error("[fb-webhook] META_APP_SECRET is not set — rejecting event");
-    // Return 200 to prevent Meta from retrying forever
-    return NextResponse.json({ received: false, reason: "misconfigured" }, { status: 200 });
-  }
-
   const signature = req.headers.get("x-hub-signature-256") ?? "";
-  if (!verifySignature(bodyBuffer, signature, appSecret)) {
+  if (!verifyMessengerSignature(bodyBuffer, signature)) {
     console.warn("[fb-webhook] Signature mismatch — dropping event");
+    // Return 200 to prevent Meta from retrying with a bad secret
     return NextResponse.json({ received: false }, { status: 200 });
   }
 
@@ -73,11 +64,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     payload = JSON.parse(bodyBuffer.toString("utf8")) as MessengerWebhookPayload;
   } catch {
-    console.error("[fb-webhook] Invalid JSON body");
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  // Only handle page object type (Messenger sends object: "page")
+  // Only handle page object type — Messenger sends object: "page"
   if (payload.object !== "page") {
     return NextResponse.json({ received: true });
   }
@@ -93,67 +83,45 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         const recipientId = event.recipient.id;
 
         // ── Incoming message ────────────────────────────────────────────────
-        if (event.message && !event.message.is_echo) {
+        if (event.message) {
           const mid = event.message.mid;
-          console.log("[fb-webhook] message | page=%s sender=%s mid=%s text=%s",
-            pageId, senderId, mid, event.message.text ?? "(no text)");
+          if (!mid) continue;
 
-          // TODO Phase 5: replace with enqueueMessengerMessage({
-          //   pageId, senderId, recipientId: recipientId, mid,
-          //   text: event.message.text ?? null,
-          //   attachments: event.message.attachments ?? null,
-          //   timestamp: event.timestamp,
-          //   receivedAt,
-          // });
-          void recipientId; // suppress unused-var until Phase 5 wires this up
-        }
+          const job: FBMessageJob = {
+            pageId,
+            senderId,
+            recipientId,
+            mid,
+            text:        event.message.text ?? null,
+            attachments: event.message.attachments ?? null,
+            timestamp:   event.timestamp,
+            isEcho:      event.message.is_echo === true,
+            receivedAt,
+          };
 
-        // ── Echo (message sent by the page) ────────────────────────────────
-        if (event.message?.is_echo) {
-          console.log("[fb-webhook] echo | page=%s mid=%s", pageId, event.message.mid);
+          await enqueueFBMessage(job);
+          continue;
         }
 
         // ── Postback (button / quick-reply click) ───────────────────────────
+        // Ack'd only — full postback handling is Phase 5b
         if (event.postback) {
           console.log("[fb-webhook] postback | page=%s sender=%s payload=%s",
             pageId, senderId, event.postback.payload);
         }
 
-        // ── Read receipt ────────────────────────────────────────────────────
-        if (event.read) {
-          console.log("[fb-webhook] read | page=%s sender=%s watermark=%d",
-            pageId, senderId, event.read.watermark);
-        }
-
-        // ── Delivery confirmation ───────────────────────────────────────────
-        if (event.delivery) {
-          console.log("[fb-webhook] delivery | page=%s sender=%s watermark=%d",
-            pageId, senderId, event.delivery.watermark);
+        // ── Read receipt + delivery — ack'd, not queued ─────────────────────
+        if (event.read || event.delivery) {
+          // Intentionally ignored at this tier; status sync is Phase 5b
         }
       }
     }
   } catch (err) {
     // Log but always return 200 to stop Meta retries
-    console.error("[fb-webhook] Processing error:", err);
+    console.error("[fb-webhook] Queue error:", err);
   }
 
   return NextResponse.json({ received: true });
-}
-
-// ─── HMAC-SHA256 signature verification ──────────────────────────────────────
-
-function verifySignature(body: Buffer, signatureHeader: string, secret: string): boolean {
-  // Header format: "sha256=<hex_digest>"
-  if (!signatureHeader.startsWith("sha256=")) return false;
-  const expected = signatureHeader.slice("sha256=".length);
-  const hmac     = createHmac("sha256", secret).update(body).digest("hex");
-
-  try {
-    return timingSafeEqual(Buffer.from(hmac, "hex"), Buffer.from(expected, "hex"));
-  } catch {
-    // Buffer lengths differ (malformed header) — reject
-    return false;
-  }
 }
 
 // ─── Payload types ────────────────────────────────────────────────────────────
@@ -187,11 +155,6 @@ interface MessengerEvent {
     payload: string;
     mid?:    string;
   };
-  read?: {
-    watermark: number;
-  };
-  delivery?: {
-    watermark: number;
-    mids?:     string[];
-  };
+  read?:     { watermark: number };
+  delivery?: { watermark: number; mids?: string[] };
 }

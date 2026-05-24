@@ -42,15 +42,18 @@ import { processSession }    from "./processors/session.processor";
 import { processScheduled }  from "./processors/scheduled.processor";
 import { processTrigger }    from "./processors/trigger.processor";
 import { processAI }         from "./processors/ai.processor";
-import { processIGMessage }  from "./processors/instagram-message.processor";
-import { processIGOutbound } from "./processors/instagram-outbound.processor";
-import { processIGComment }  from "./processors/instagram-comment.processor";
-import { maybeRefreshToken } from "@/lib/instagram/token-store";
+import { processIGMessage }         from "./processors/instagram-message.processor";
+import { processIGOutbound }        from "./processors/instagram-outbound.processor";
+import { processIGComment }         from "./processors/instagram-comment.processor";
+import { maybeRefreshToken }        from "@/lib/instagram/token-store";
+import { processMessengerMessage }  from "./processors/messenger-message.processor";
+import { processMessengerOutbound } from "./processors/messenger-outbound.processor";
 
 import type {
   MessageJob, StatusJob, MediaJob, AutomationJob,
   OutboundJob, ConnectionJob, SessionJob, ScheduledJob, TriggerJob, AIJob,
   IGMessageJob, IGOutboundJob, IGCommentJob, IGMediaJob, IGTokenJob,
+  FBMessageJob, FBOutboundJob,
 } from "@/lib/queue/types";
 
 // ─── Identity ─────────────────────────────────────────────────────────────────
@@ -73,11 +76,14 @@ const CONCURRENCY = {
   trigger:    Number(process.env.WORKER_CONCURRENCY_TRIGGER    ?? 5),
   ai:         Number(process.env.WORKER_CONCURRENCY_AI         ?? 3),
   // Instagram — DM sends are rate-limited by Meta, keep outbound concurrency low
-  igMessage:  Number(process.env.WORKER_CONCURRENCY_IG_MESSAGE  ?? 5),
-  igOutbound: Number(process.env.WORKER_CONCURRENCY_IG_OUTBOUND ?? 1),
-  igComment:  Number(process.env.WORKER_CONCURRENCY_IG_COMMENT  ?? 3),
-  igMedia:    Number(process.env.WORKER_CONCURRENCY_IG_MEDIA    ?? 3),
-  igToken:    Number(process.env.WORKER_CONCURRENCY_IG_TOKEN    ?? 1),
+  igMessage:   Number(process.env.WORKER_CONCURRENCY_IG_MESSAGE  ?? 5),
+  igOutbound:  Number(process.env.WORKER_CONCURRENCY_IG_OUTBOUND ?? 1),
+  igComment:   Number(process.env.WORKER_CONCURRENCY_IG_COMMENT  ?? 3),
+  igMedia:     Number(process.env.WORKER_CONCURRENCY_IG_MEDIA    ?? 3),
+  igToken:     Number(process.env.WORKER_CONCURRENCY_IG_TOKEN    ?? 1),
+  // Facebook Messenger
+  fbmMessage:  Number(process.env.WORKER_CONCURRENCY_FBM_MESSAGE  ?? 5),
+  fbmOutbound: Number(process.env.WORKER_CONCURRENCY_FBM_OUTBOUND ?? 2),
 };
 
 // ─── Worker factory ───────────────────────────────────────────────────────────
@@ -180,7 +186,10 @@ async function start(): Promise<void> {
     // igm:media and igm:token share the same no-op stub until dedicated processors
     // are needed — DLQ catches any jobs that land there in the meantime.
     createWorker<IGMediaJob>   (QUEUE_NAMES.IGM_MEDIA,      async () => { /* stub — media stored from message processor */ }, CONCURRENCY.igMedia),
-    createWorker<IGTokenJob>   (QUEUE_NAMES.IGM_TOKEN,      (j) => maybeRefreshToken(j.data.accountId),                                                                    CONCURRENCY.igToken),
+    createWorker<IGTokenJob>   (QUEUE_NAMES.IGM_TOKEN,      (j) => maybeRefreshToken(j.data.accountId),                      CONCURRENCY.igToken),
+    // Facebook Messenger
+    createWorker<FBMessageJob> (QUEUE_NAMES.FBM_MESSAGE,    (j) => processMessengerMessage(j.data),  CONCURRENCY.fbmMessage),
+    createWorker<FBOutboundJob>(QUEUE_NAMES.FBM_OUTBOUND,   (j) => processMessengerOutbound(j.data), CONCURRENCY.fbmOutbound),
   ];
 
   log.info("queues online", { queues: Object.values(QUEUE_NAMES) });

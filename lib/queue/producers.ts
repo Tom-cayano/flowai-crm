@@ -17,6 +17,8 @@ import {
   getIGCommentQueue,
   getIGMediaQueue,
   getIGTokenQueue,
+  getFBMMessageQueue,
+  getFBMOutboundQueue,
   BASE_JOB_OPTIONS,
   RETRY_OPTIONS,
 } from "./queues";
@@ -36,6 +38,8 @@ import type {
   IGCommentJob,
   IGMediaJob,
   IGTokenJob,
+  FBMessageJob,
+  FBOutboundJob,
 } from "./types";
 
 export async function enqueueMessage(job: MessageJob): Promise<string> {
@@ -194,6 +198,29 @@ export async function enqueueIGTokenRefresh(job: IGTokenJob): Promise<string> {
     attempts: 3,
     backoff: { type: "exponential", delay: 10_000 },
     jobId: `igtoken:${job.accountId}`,
+  });
+  return result.id ?? "";
+}
+
+// ─── Facebook Messenger producers ─────────────────────────────────────────────
+
+export async function enqueueFBMessage(job: FBMessageJob): Promise<string> {
+  const q = getFBMMessageQueue();
+  const result = await q.add("process", job, {
+    ...BASE_JOB_OPTIONS,
+    ...RETRY_OPTIONS,
+    // Deduplicate: same Meta message ID must never be processed twice
+    jobId: `fbm:${job.mid}`,
+  });
+  return result.id ?? "";
+}
+
+export async function enqueueFBOutbound(job: FBOutboundJob): Promise<string> {
+  const q = getFBMOutboundQueue();
+  const result = await q.add("process", job, {
+    ...BASE_JOB_OPTIONS,
+    attempts: 4,
+    backoff: { type: "exponential", delay: 3_000 },
   });
   return result.id ?? "";
 }

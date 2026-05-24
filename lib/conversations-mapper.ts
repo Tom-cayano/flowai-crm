@@ -14,7 +14,7 @@ import type { Conversation, Message, ConversationStatus } from "@/types";
 // unexpected DB value never silently propagates into the app.
 
 const VALID_CONV_STATUSES = new Set(["open", "resolved", "pending", "spam"]);
-const VALID_CHANNELS = new Set(["whatsapp", "email", "sms"]);
+const VALID_CHANNELS = new Set(["whatsapp", "instagram", "messenger", "email", "sms"]);
 const VALID_SENDERS = new Set(["agent", "contact"]);
 
 function safeConvStatus(s: unknown): ConversationStatus {
@@ -23,9 +23,9 @@ function safeConvStatus(s: unknown): ConversationStatus {
     : "open";
 }
 
-function safeChannel(s: unknown): "whatsapp" | "email" | "sms" {
+function safeChannel(s: unknown): "whatsapp" | "instagram" | "messenger" | "email" | "sms" {
   return VALID_CHANNELS.has(s as string)
-    ? (s as "whatsapp" | "email" | "sms")
+    ? (s as "whatsapp" | "instagram" | "messenger" | "email" | "sms")
     : "whatsapp";
 }
 

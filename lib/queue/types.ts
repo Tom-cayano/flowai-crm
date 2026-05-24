@@ -27,6 +27,9 @@ export const QUEUE_NAMES = {
   IGM_COMMENT:    "igm:comment",    // Instagram comment event processing
   IGM_MEDIA:      "igm:media",      // Media download from Meta CDN → Storage
   IGM_TOKEN:      "igm:token",      // Long-lived token refresh jobs
+  // ─── Facebook Messenger ────────────────────────────────────────────────
+  FBM_MESSAGE:    "fbm:message",    // Inbound Messenger message pipeline
+  FBM_OUTBOUND:   "fbm:outbound",   // Outbound Messenger message sending
 } as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];
@@ -247,6 +250,42 @@ export interface IGTokenJob {
   accountId: string;
   userId:    string;
   action:    "refresh";
+}
+
+// ─── Facebook Messenger job payloads ─────────────────────────────────────────
+
+/**
+ * Raw Meta webhook messaging event for Facebook Messenger.
+ * One job per messaging entry (one per message received).
+ */
+export interface FBMessageJob {
+  pageId:      string;   // Facebook Page ID (entry.id from webhook)
+  senderId:    string;   // Messenger Page-Scoped User ID (PSID) of the sender
+  recipientId: string;   // Page's own PSID
+  mid:         string;   // Meta message ID — idempotency key
+  text:        string | null;
+  attachments: Array<{
+    type:    string;   // "image" | "video" | "audio" | "file" | "template" | "fallback"
+    payload: { url?: string; title?: string; sticker_id?: number };
+  }> | null;
+  timestamp:   number;   // unix ms from Meta
+  isEcho:      boolean;  // true = sent by the page itself (skip for inbound)
+  receivedAt:  string;   // ISO — end-to-end latency tracking
+}
+
+/**
+ * Outbound Facebook Messenger message.
+ * Processed at low concurrency (rate limits: ~250 msgs/sec per page).
+ */
+export interface FBOutboundJob {
+  pageId:         string;   // Facebook Page ID (for page token lookup)
+  userId:         string;
+  recipientPsid:  string;   // Messenger PSID to send to
+  content:        string;
+  conversationId: string;
+  /** Pre-written CRM messages row — update external_id after send when present. */
+  messageId?:     string;
+  origin:         "automation" | "manual" | "ai_reply";
 }
 
 // ─── Job result shapes ────────────────────────────────────────────────────────

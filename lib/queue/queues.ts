@@ -21,6 +21,8 @@ import type {
   IGCommentJob,
   IGMediaJob,
   IGTokenJob,
+  FBMessageJob,
+  FBOutboundJob,
 } from "./types";
 
 // ─── Default job options ──────────────────────────────────────────────────────
@@ -55,6 +57,10 @@ let igCommentQueue:  Queue<IGCommentJob>  | null = null;
 let igMediaQueue:    Queue<IGMediaJob>    | null = null;
 let igTokenQueue:    Queue<IGTokenJob>    | null = null;
 
+// ─── Facebook Messenger singletons ────────────────────────────────────────────
+let fbmMessageQueue:  Queue<FBMessageJob>  | null = null;
+let fbmOutboundQueue: Queue<FBOutboundJob> | null = null;
+
 function conn() {
   return { connection: getRedis() };
 }
@@ -75,5 +81,8 @@ export function getIGOutboundQueue(): Queue<IGOutboundJob> { return (igOutboundQ
 export function getIGCommentQueue():  Queue<IGCommentJob>  { return (igCommentQueue  ??= new Queue(QUEUE_NAMES.IGM_COMMENT,    conn())); }
 export function getIGMediaQueue():    Queue<IGMediaJob>    { return (igMediaQueue    ??= new Queue(QUEUE_NAMES.IGM_MEDIA,      conn())); }
 export function getIGTokenQueue():    Queue<IGTokenJob>    { return (igTokenQueue    ??= new Queue(QUEUE_NAMES.IGM_TOKEN,      conn())); }
+
+export function getFBMMessageQueue():  Queue<FBMessageJob>  { return (fbmMessageQueue  ??= new Queue(QUEUE_NAMES.FBM_MESSAGE,  conn())); }
+export function getFBMOutboundQueue(): Queue<FBOutboundJob> { return (fbmOutboundQueue ??= new Queue(QUEUE_NAMES.FBM_OUTBOUND, conn())); }
 
 export { BASE_JOB_OPTIONS, RETRY_OPTIONS };

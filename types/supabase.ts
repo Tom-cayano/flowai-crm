@@ -125,7 +125,7 @@ export interface Database {
           contact_phone: string | null;
           assigned_to: string | null;
           status: "open" | "resolved" | "pending" | "spam";
-          channel: "whatsapp" | "email" | "sms" | "instagram";
+          channel: "whatsapp" | "email" | "sms" | "instagram" | "messenger";
           tags: string[];
           unread_count: number;
           last_message_at: string | null;
@@ -143,7 +143,7 @@ export interface Database {
           contact_phone?: string | null;
           assigned_to?: string | null;
           status?: "open" | "resolved" | "pending" | "spam";
-          channel?: "whatsapp" | "email" | "sms" | "instagram";
+          channel?: "whatsapp" | "email" | "sms" | "instagram" | "messenger";
           tags?: string[];
           unread_count?: number;
           last_message_at?: string | null;
@@ -1680,6 +1680,61 @@ export interface Database {
           content?:          string | null;
           parent_comment_id?: string | null;
           created_at?:       string;
+        };
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+      // ─── Facebook Messenger ──────────────────────────────────────────────────
+      facebook_pages: {
+        Row: {
+          id:                    string;
+          workspace_id:          string;
+          user_id:               string;
+          page_id:               string;
+          page_name:             string | null;
+          page_access_token_enc: string;
+          is_active:             boolean;
+          connected_at:          string;
+          updated_at:            string;
+        };
+        Insert: {
+          id?:                    string;
+          workspace_id:           string;
+          user_id:                string;
+          page_id:                string;
+          page_name?:             string | null;
+          page_access_token_enc:  string;
+          is_active?:             boolean;
+          connected_at?:          string;
+          updated_at?:            string;
+        };
+        Update: {
+          page_name?:             string | null;
+          page_access_token_enc?: string;
+          is_active?:             boolean;
+          updated_at?:            string;
+        };
+        Relationships: [
+          { foreignKeyName: "facebook_pages_workspace_id_fkey"; columns: ["workspace_id"]; referencedRelation: "workspaces"; referencedColumns: ["id"]; },
+          { foreignKeyName: "facebook_pages_user_id_fkey";      columns: ["user_id"];      referencedRelation: "users";      referencedColumns: ["id"]; },
+        ];
+      };
+      messenger_webhook_events: {
+        Row: {
+          id:           string;
+          event_id:     string;
+          event_type:   string;
+          page_id:      string | null;
+          raw_payload:  Record<string, unknown>;
+          processed_at: string;
+        };
+        Insert: {
+          id?:          string;
+          event_id:     string;
+          event_type:   string;
+          page_id?:     string | null;
+          raw_payload?: Record<string, unknown>;
+          processed_at?: string;
         };
         Update: Record<string, never>;
         Relationships: [];

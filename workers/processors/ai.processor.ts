@@ -1,5 +1,9 @@
 // AI queue processor — handles AIJob payloads from wpp:ai.
 // Runs the full orchestration pipeline; rethrowing on error triggers BullMQ retry.
+//
+// Routing:
+//   • When job.autoReplyMode is set → run through runAutoReply() (new engine)
+//   • Otherwise → run legacy runAIReply() path (unchanged behaviour)
 
 import type { AIJob } from "@/lib/queue/types";
 import { runAIReply } from "@/lib/ai/orchestrator";
@@ -7,6 +11,7 @@ import { classifyIntent } from "@/lib/ai/intent-classifier";
 import { qualifyLead } from "@/lib/ai/lead-qualifier";
 import { storeEmbedding } from "@/lib/ai/embeddings";
 import { upsertLeadScore } from "@/lib/ai/lead-scorer";
+import { runAutoReply } from "@/lib/ai/auto-reply-engine";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createLogger } from "@/lib/observability/logger";
 
@@ -24,28 +29,50 @@ export async function processAI(job: AIJob): Promise<void> {
   const { userId, conversationId, correlationId } = job;
   const qlog = log.child({ userId, conversationId, correlationId });
 
-  // ── Core AI reply (always runs) ─────────────────────────────────────────────
-  const result = await runAIReply({
-    userId,
-    conversationId,
-    phone:          job.phone,
-    incomingText:   job.incomingText,
-    instanceName:   job.instanceName,
-    serverUrl:      job.serverUrl,
-    instanceApiKey: job.instanceApiKey,
-    promptId:       job.promptId,
-    model:          job.model,
-    maxTokens:      job.maxTokens,
-    temperature:    job.temperature,
-  });
+  // ── Auto-reply engine (new path) ─────────────────────────────────────────────
+  if (job.autoReplyMode && job.autoReplyMode !== "suggestion") {
+    qlog.info("routing to auto-reply engine", { mode: job.autoReplyMode });
 
-  qlog.info("reply result", {
-    sent:      result.sent,
-    handedOff: result.handedOff,
-    tokens:    result.tokens?.total,
-  });
+    const result = await runAutoReply({
+      userId,
+      conversationId,
+      phone:            job.phone,
+      incomingText:     job.incomingText,
+      channel:          job.channel ?? "whatsapp",
+      instanceName:     job.instanceName,
+      serverUrl:        job.serverUrl,
+      instanceApiKey:   job.instanceApiKey,
+      triggerMessageId: job.triggerMessageId,
+      promptId:         job.promptId,
+    });
 
-  // ── Optional operations ──────────────────────────────────────────────────────
+    qlog.info("auto-reply result", result as unknown as Record<string, unknown>);
+    // Optional ops still run below (classify, qualify, embed)
+
+  } else {
+    // ── Legacy AI reply (unchanged behaviour) ──────────────────────────────────
+    const result = await runAIReply({
+      userId,
+      conversationId,
+      phone:          job.phone,
+      incomingText:   job.incomingText,
+      instanceName:   job.instanceName,
+      serverUrl:      job.serverUrl,
+      instanceApiKey: job.instanceApiKey,
+      promptId:       job.promptId,
+      model:          job.model,
+      maxTokens:      job.maxTokens,
+      temperature:    job.temperature,
+    });
+
+    qlog.info("reply result", {
+      sent:      result.sent,
+      handedOff: result.handedOff,
+      tokens:    result.tokens?.total,
+    });
+  }
+
+  // ── Optional operations (shared by both paths) ───────────────────────────────
 
   if (job.ops?.classify) {
     try {
@@ -63,7 +90,6 @@ export async function processAI(job: AIJob): Promise<void> {
   if (job.ops?.qualify) {
     try {
       const db = createAdminClient();
-      // Build a compact conversation snapshot for qualification
       const { data: msgs } = await db
         .from("messages")
         .select("sender, content")
@@ -79,7 +105,6 @@ export async function processAI(job: AIJob): Promise<void> {
 
       qlog.info("lead qualified", { tier: qual.tier, score: qual.score });
 
-      // Apply score delta to contact_scores
       const delta = TIER_DELTAS[qual.tier] ?? 0;
       if (delta !== 0) {
         const { data: conv } = await db

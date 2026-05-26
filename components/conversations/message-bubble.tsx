@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, CheckCheck, AlertCircle, RefreshCw, Loader2 } from "lucide-react";
+import { Check, CheckCheck, AlertCircle, RefreshCw, Loader2, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MediaMessage } from "./media-message";
 import { retryFailedMessage } from "@/lib/actions/conversations";
@@ -59,9 +59,17 @@ export function MessageBubble({
       >
         {/* Agent label */}
         {isAgent && message.agentName && (
-          <p className="text-[10px] font-semibold text-white/70 mb-0.5 -mt-0.5">
-            {message.agentName}
-          </p>
+          <div className="flex items-center gap-1.5 mb-0.5 -mt-0.5">
+            <p className="text-[10px] font-semibold text-white/70">
+              {message.agentName}
+            </p>
+            {message.isAiGenerated && (
+              <span className="flex items-center gap-0.5 text-[8px] uppercase tracking-wider font-semibold text-emerald-200 bg-emerald-500/20 px-1.5 rounded-sm">
+                <Sparkles className="h-2 w-2" />
+                AI
+              </span>
+            )}
+          </div>
         )}
 
         {/* Media content */}

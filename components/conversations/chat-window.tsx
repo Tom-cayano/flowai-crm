@@ -50,8 +50,10 @@ import { TypingIndicator }          from "./typing-indicator";
 import { AgentAssigner }            from "./agent-assigner";
 import { AICopilotPanel }           from "./ai-copilot-panel";
 import { ReplySuggestions }         from "@/components/ai/reply-suggestions";
+import { DraftApprovalBanner }      from "@/components/ai/draft-approval-banner";
 import { useInfiniteMessages }      from "@/lib/hooks/use-infinite-messages";
 import { useTypingIndicator }       from "@/lib/hooks/use-typing-indicator";
+import { useAIDrafts }              from "@/lib/hooks/use-ai-drafts";
 import { sendMessage, updateConversationStatus } from "@/lib/actions/conversations";
 import { getInitials, cn }          from "@/lib/utils";
 import type { Conversation, ConversationStatus, Message } from "@/types";
@@ -108,6 +110,8 @@ export function ChatWindow({
     conversationId: conversation.id,
     userId,
   });
+
+  const { draft, approveDraft, rejectDraft } = useAIDrafts(conversation.id);
 
   // Scroll al fondo en carga inicial
   useEffect(() => {
@@ -439,6 +443,49 @@ export function ChatWindow({
 
       {/* ── Input ── */}
       <div className="border-t border-border bg-card shrink-0">
+        {draft && (
+          <DraftApprovalBanner
+            draft={draft}
+            onApprove={async (id) => {
+              const tempId = `temp-ai-${Date.now()}`;
+              addOptimistic({
+                id: tempId,
+                conversationId: conversation.id,
+                content: draft.content,
+                type: "text",
+                sender: "agent",
+                status: "sent",
+                timestamp: new Date().toISOString(),
+              });
+              await approveDraft(id);
+              // Optimistic confirm logic handled by webhook/polling usually, 
+              // but we just keep it sent for now
+            }}
+            onReject={async (id) => {
+              await rejectDraft(id);
+            }}
+            onEditAndSend={async (id, content) => {
+              // Reject draft then send manually
+              await rejectDraft(id, "Manually edited");
+              setInput(content); // Fallback to let the user send it via standard flow, or just send directly
+              // Let's send directly
+              const tempId = `temp-edit-${Date.now()}`;
+              addOptimistic({
+                id: tempId,
+                conversationId: conversation.id,
+                content: content,
+                type: "text",
+                sender: "agent",
+                status: "sent",
+                timestamp: new Date().toISOString(),
+              });
+              const result = await sendMessage(conversation.id, content);
+              if (result.error) removeOptimistic(tempId);
+              else if (result.data) confirmOptimistic(tempId, result.data);
+            }}
+          />
+        )}
+        
         {/* AI Reply Suggestions chips — rendered above the textarea */}
         <ReplySuggestions
           conversationId={conversation.id}

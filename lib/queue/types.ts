@@ -165,6 +165,18 @@ export interface AIJob {
     followUp?:     boolean;
   };
   correlationId?:  string;
+  /**
+   * Auto-reply engine mode — when set, the AI processor routes through
+   * runAutoReply() instead of (or in addition to) runAIReply().
+   *   "suggestion" → suggest only (chips, no draft)
+   *   "approval"   → generate draft, await agent approval
+   *   "full_auto"  → generate draft, auto-send if confidence ≥ threshold
+   */
+  autoReplyMode?:    "suggestion" | "approval" | "full_auto";
+  /** CRM messages.id that triggered this AI job — stored on the draft for context. */
+  triggerMessageId?: string;
+  /** Channel this message arrived on — used for channel gate in auto-reply engine. */
+  channel?:          string;
 }
 
 /** Resume a wait_delay automation workflow node after delay expires. */

@@ -13,6 +13,8 @@ import {
   Clock,
   MessageSquare,
   Volume2,
+  Bot,
+  Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,6 +35,7 @@ const settingsSections = [
   { id: "workspace", label: "Espacio de trabajo", icon: Globe },
   { id: "security", label: "Seguridad", icon: Shield },
   { id: "integrations", label: "Integraciones", icon: Webhook },
+  { id: "ai", label: "Motor IA (Auto Reply)", icon: Bot },
   { id: "billing", label: "Facturación", icon: CreditCard },
 ];
 
@@ -359,6 +362,82 @@ export default function SettingsPage() {
                     </div>
                   </div>
                 ))}
+              </div>
+            </>
+          )}
+
+          {/* AI Settings */}
+          {activeSection === "ai" && (
+            <>
+              <div>
+                <div className="flex items-center gap-2 mb-0.5">
+                  <Bot className="h-5 w-5 text-emerald-500" />
+                  <h2 className="text-base font-semibold">Motor IA (Auto Reply)</h2>
+                </div>
+                <p className="text-xs text-muted-foreground">Configura el comportamiento del copiloto y auto-respuestas</p>
+              </div>
+
+              <div className="rounded-xl border border-border bg-card p-5 space-y-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold flex items-center gap-2">
+                      <Sparkles className="h-4 w-4 text-emerald-500" />
+                      Activar Motor de Auto Respuesta
+                    </h3>
+                    <p className="text-xs text-muted-foreground mt-1 max-w-sm">
+                      Permite que la IA genere borradores automáticos para los mensajes entrantes. 
+                      En "Modo Aprobación", los agentes deben revisar antes de enviar.
+                    </p>
+                  </div>
+                  <Switch defaultChecked />
+                </div>
+
+                <Separator />
+
+                <div className="space-y-4">
+                  <div>
+                    <Label className="text-xs mb-1.5 block">Nivel de Autonomía</Label>
+                    <div className="flex bg-muted rounded-lg p-1">
+                      <button className="flex-1 text-xs py-1.5 rounded-md bg-background shadow-sm font-medium">Borrador (Sugerencias)</button>
+                      <button className="flex-1 text-xs py-1.5 rounded-md text-muted-foreground hover:text-foreground transition-colors">Aprobación (Revisión)</button>
+                      <button className="flex-1 text-xs py-1.5 rounded-md text-muted-foreground hover:text-foreground transition-colors">Totalmente Automático</button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Umbral de Confianza (Confidence Score)</Label>
+                    <div className="flex items-center gap-4">
+                      <input type="range" min="50" max="100" defaultValue="85" className="flex-1 accent-emerald-500" />
+                      <span className="text-xs font-mono bg-muted px-2 py-1 rounded-md">85%</span>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">Solo se sugerirán respuestas cuya confianza sea mayor a este valor.</p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Tiempo de Cooldown</Label>
+                    <select className="w-full h-8 text-sm bg-background border border-border rounded-md px-2 focus:ring-1 focus:ring-emerald-500 outline-none">
+                      <option value="60">1 minuto (Recomendado)</option>
+                      <option value="300">5 minutos</option>
+                      <option value="900">15 minutos</option>
+                    </select>
+                    <p className="text-[10px] text-muted-foreground">Tiempo de espera entre respuestas automáticas a un mismo contacto.</p>
+                  </div>
+
+                  <div className="flex items-center justify-between py-2 border-t border-border">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Escalado a Humano (Human Handoff)</p>
+                      <p className="text-[10px] text-muted-foreground max-w-sm mt-0.5">
+                        Si la IA es rechazada 3 veces consecutivas, desactiva el auto-reply para esa conversación.
+                      </p>
+                    </div>
+                    <Switch defaultChecked />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-2">
+                <Button size="sm" className="text-xs h-8 bg-emerald-600 hover:bg-emerald-700 text-white">Guardar configuración</Button>
+                <Button variant="outline" size="sm" className="text-xs h-8">Restaurar valores por defecto</Button>
               </div>
             </>
           )}

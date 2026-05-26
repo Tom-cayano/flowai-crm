@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import { MarketingNavbar } from "@/components/marketing/navbar";
 import { Hero } from "@/components/marketing/hero";
-import { Features } from "@/components/marketing/features";
+import { ChannelsSection } from "@/components/marketing/channels-section";
+import { AISection } from "@/components/marketing/ai-section";
+import { FeaturesV2 } from "@/components/marketing/features-v2";
 import { Testimonials } from "@/components/marketing/testimonials";
 import { Pricing } from "@/components/marketing/pricing";
 import { CtaSection } from "@/components/marketing/cta-section";
@@ -19,7 +21,9 @@ export default function LandingPage() {
       <MarketingNavbar />
       <main>
         <Hero />
-        <Features />
+        <ChannelsSection />
+        <AISection />
+        <FeaturesV2 />
         <Testimonials />
         <Pricing />
         <CtaSection />

@@ -41,14 +41,15 @@ export async function getUserWorkspaces(userId: string): Promise<Workspace[]> {
   return [...(owned ?? []), ...memberWorkspaces].map(toWorkspace);
 }
 
-// ─── Create workspace ─────────────────────────────────────────
+import { createClient } from "@/lib/supabase/server";
 
 export async function createWorkspace(opts: {
   ownerId:   string;
   name:      string;
   parentId?: string;
 }): Promise<Workspace> {
-  const db   = createAdminClient();
+  // Use authenticated client instead of admin client to respect RLS
+  const db   = await createClient();
   const slug = await generateUniqueSlug(opts.name);
 
   const { data, error } = await db
@@ -66,16 +67,8 @@ export async function createWorkspace(opts: {
 
   if (error || !data) throw new Error(`Failed to create workspace: ${error?.message}`);
 
-  // Seed onboarding progress
-  await db.from("onboarding_progress").insert({ workspace_id: data.id });
-  // Seed health record
-  await db.from("workspace_health").insert({ workspace_id: data.id });
-  // Add owner as member
-  await db.from("workspace_members").insert({
-    workspace_id: data.id,
-    user_id:      opts.ownerId,
-    role:         "owner",
-  });
+  // We no longer manually seed onboarding, health or members here.
+  // A Postgres TRIGGER (workspace_created_trigger) automatically does this securely.
 
   return toWorkspace(data);
 }

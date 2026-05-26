@@ -77,7 +77,7 @@ export async function isWithinQuota(
 
     if (!workspace) return true;
 
-    const { getPlan } = await import("./plans.js");
+    const { getPlan } = await import("./plans");
     const plan = getPlan(workspace.plan_id);
 
     const fieldMap: Record<string, { used: number; limit: number }> = {

@@ -3,7 +3,7 @@
 // must not interrupt the main AI pipeline.
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { estimateCostUSD } from "./client.js";
+import { estimateCostUSD } from "./client";
 
 export type AIOperation =
   | "reply"

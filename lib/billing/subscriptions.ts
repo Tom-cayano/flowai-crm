@@ -2,9 +2,9 @@
 // All writes go through Stripe webhooks to keep state consistent.
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getPlan } from "./plans.js";
+import { getPlan } from "./plans";
 import type { Plan, UsageRecord, UsageStatus } from "@/types/billing";
-import { buildUsageStatus } from "./plans.js";
+import { buildUsageStatus } from "./plans";
 import type { Database } from "@/types/supabase";
 
 type Json = Database["public"]["Tables"]["billing_events"]["Row"]["payload"];

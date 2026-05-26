@@ -13,7 +13,7 @@
 
 import type Stripe from "stripe";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { syncSubscriptionFromStripe, recordBillingEvent } from "./subscriptions.js";
+import { syncSubscriptionFromStripe, recordBillingEvent } from "./subscriptions";
 import { createLogger } from "@/lib/observability/logger";
 
 const log = createLogger("billing:webhooks");

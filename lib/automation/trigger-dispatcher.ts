@@ -5,7 +5,7 @@
 // to runMatchingAutomations. They must run server-side (worker or server action).
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { runMatchingAutomations } from "./engine.js";
+import { runMatchingAutomations } from "./engine";
 import type { ExecutionContext, TriggerType } from "@/types/automation";
 
 // ─── Instance resolution helper ───────────────────────────────────────────────

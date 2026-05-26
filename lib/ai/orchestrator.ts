@@ -14,17 +14,17 @@
 //   11. Update ai_context (token count + rolling summary trigger)
 //   12. Async post-turn: embed message pair + maybe summarize
 
-import { getOpenAI } from "./client.js";
-import { recordUsage } from "./metering.js";
-import { moderateText } from "./moderator.js";
-import { retrieveRelevantContext, embedMessagePair } from "./embeddings.js";
-import { maybeGenerateSummary } from "./summarizer.js";
-import { executeHandoff } from "./handoff.js";
+import { getOpenAI } from "./client";
+import { recordUsage } from "./metering";
+import { moderateText } from "./moderator";
+import { retrieveRelevantContext, embedMessagePair } from "./embeddings";
+import { maybeGenerateSummary } from "./summarizer";
+import { executeHandoff } from "./handoff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { enqueueOutbound } from "@/lib/queue/producers";
-import { resolvePrompt, interpolatePrompt } from "./prompt-manager.js";
-import { getAIContext, updateAIContext } from "./context-manager.js";
-import { detectHandoffRules } from "./handoff-detector.js";
+import { resolvePrompt, interpolatePrompt } from "./prompt-manager";
+import { getAIContext, updateAIContext } from "./context-manager";
+import { detectHandoffRules } from "./handoff-detector";
 import { createLogger } from "@/lib/observability/logger";
 
 const log = createLogger("ai:orchestrator");
@@ -294,4 +294,4 @@ export async function runAIReply(opts: AIReplyOptions): Promise<AIReplyResult> {
 }
 
 // Re-export so callers that imported generateRollingSummary from here still work
-export { generateRollingSummary } from "./summarizer.js";
+export { generateRollingSummary } from "./summarizer";

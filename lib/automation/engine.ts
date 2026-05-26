@@ -14,21 +14,21 @@
 //   • Failure isolation   — per-automation try/catch; one failure does not abort others
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { evaluateTrigger } from "./trigger-evaluator.js";
-import { evaluateCondition, type FieldBag } from "./condition-evaluator.js";
-import { executeAction } from "./action-executor.js";
-import { scheduleWait } from "./scheduler.js";
+import { evaluateTrigger } from "./trigger-evaluator";
+import { evaluateCondition, type FieldBag } from "./condition-evaluator";
+import { executeAction } from "./action-executor";
+import { scheduleWait } from "./scheduler";
 import {
   isDuplicate,
   isRateLimited,
   isCancelled,
   isAutomationActive,
-} from "./execution-guard.js";
+} from "./execution-guard";
 import {
   buildEnrichedVariables,
   loadContactTags,
   loadConversationTags,
-} from "./context-builder.js";
+} from "./context-builder";
 import type {
   WorkflowGraph,
   WorkflowNode,
@@ -402,7 +402,7 @@ async function dispatchActionSideEffects(
 ): Promise<void> {
   try {
     const { dispatchTagAdded, dispatchTagRemoved, dispatchStatusChanged } =
-      await import("./trigger-dispatcher.js");
+      await import("./trigger-dispatcher");
 
     if (action.type === "add_tag" && ctx.contactId && ctx.conversationId) {
       void dispatchTagAdded({

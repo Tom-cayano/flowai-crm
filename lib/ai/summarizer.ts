@@ -2,9 +2,9 @@
 // Compresses long conversation history into a dense summary stored in ai_context,
 // freeing space in the prompt context window while preserving meaning.
 
-import { getOpenAI } from "./client.js";
-import { recordUsage } from "./metering.js";
-import { getAIContext, updateAIContext } from "./context-manager.js";
+import { getOpenAI } from "./client";
+import { recordUsage } from "./metering";
+import { getAIContext, updateAIContext } from "./context-manager";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 const SUMMARY_MODEL  = "gpt-4o-mini";

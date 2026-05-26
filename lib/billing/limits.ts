@@ -3,7 +3,7 @@
 // All checks fail-open on unexpected DB errors so billing never breaks the app.
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getWorkspaceSubscription } from "./subscriptions.js";
+import { getWorkspaceSubscription } from "./subscriptions";
 
 export interface LimitCheck {
   ok:       boolean;

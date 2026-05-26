@@ -3,7 +3,12 @@
 // only used from the worker, never from the browser).
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { enqueueOutbound, enqueueIGOutbound } from "@/lib/queue/producers";
+import {
+  enqueueOutbound,
+  enqueueIGOutbound,
+  enqueueWACOutbound,
+  enqueueFBOutbound,
+} from "@/lib/queue/producers";
 import { runAIReply } from "@/lib/ai/orchestrator";
 import { classifyIntent } from "@/lib/ai/intent-classifier";
 import { upsertLeadScore } from "@/lib/ai/lead-scorer";
@@ -33,18 +38,45 @@ export async function executeAction(
       // ── Send plain text message ───────────────────────────────────────────
       case "send_message": {
         const content = interpolate(action.content, ctx);
-        await enqueueOutbound({
-          instanceName: ctx.instanceName,
-          serverUrl:    ctx.serverUrl,
-          apiKey:       ctx.instanceApiKey,
-          phone:        ctx.phone,
-          content,
-          type:         "text",
-          conversationId: ctx.conversationId ?? "",
-          userId:       ctx.userId,
-          origin:       "automation",
-          agentName:    "FlowAI",
-        });
+
+        if (ctx.instanceName.startsWith("wac:")) {
+          // WhatsApp Cloud API direct
+          const accountId = ctx.wacAccountId ?? ctx.instanceName.slice(4);
+          await enqueueWACOutbound({
+            accountId,
+            userId:         ctx.userId,
+            to:             ctx.phone.replace(/^\+/, ""),  // WAC expects E.164 without +
+            content,
+            conversationId: ctx.conversationId ?? "",
+            origin:         "automation",
+          });
+        } else if (ctx.instanceName.startsWith("fbm:")) {
+          // Facebook Messenger
+          const pageId = ctx.fbmPageId ?? ctx.instanceName.slice(4);
+          await enqueueFBOutbound({
+            pageId,
+            userId:         ctx.userId,
+            recipientPsid:  ctx.phone,  // phone holds PSID for Messenger conversations
+            content,
+            conversationId: ctx.conversationId ?? "",
+            origin:         "automation",
+          });
+        } else {
+          // WhatsApp via Evolution API (default)
+          await enqueueOutbound({
+            instanceName:   ctx.instanceName,
+            serverUrl:      ctx.serverUrl,
+            apiKey:         ctx.instanceApiKey,
+            phone:          ctx.phone,
+            content,
+            type:           "text",
+            conversationId: ctx.conversationId ?? "",
+            userId:         ctx.userId,
+            origin:         "automation",
+            agentName:      "FlowAI",
+          });
+        }
+
         await log("info", `Mensaje enviado: "${content.slice(0, 60)}…"`);
         return { ok: true };
       }
@@ -242,6 +274,26 @@ export async function executeAction(
       case "send_template":
         await log("warn", "send_template aún no implementado");
         return { ok: true };
+
+      // ── Messenger: send message ───────────────────────────────────────────
+      case "send_messenger_message": {
+        const pageId = ctx.fbmPageId ?? (ctx.instanceName.startsWith("fbm:") ? ctx.instanceName.slice(4) : "");
+        if (!pageId || !ctx.phone) {
+          await log("warn", "send_messenger_message: missing fbmPageId or recipient PSID");
+          return { ok: true };
+        }
+        const content = interpolate(action.content, ctx);
+        await enqueueFBOutbound({
+          pageId,
+          userId:         ctx.userId,
+          recipientPsid:  ctx.phone,
+          content,
+          conversationId: ctx.conversationId ?? "",
+          origin:         "automation",
+        });
+        await log("info", `Messenger enviado: "${content.slice(0, 60)}…"`);
+        return { ok: true };
+      }
 
       // ── Instagram: send DM ────────────────────────────────────────────────
       // accountId and recipientIgId come from execution context (set by ig processors)

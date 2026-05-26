@@ -19,6 +19,8 @@ import {
   getIGTokenQueue,
   getFBMMessageQueue,
   getFBMOutboundQueue,
+  getWACMessageQueue,
+  getWACOutboundQueue,
   BASE_JOB_OPTIONS,
   RETRY_OPTIONS,
 } from "./queues";
@@ -40,6 +42,8 @@ import type {
   IGTokenJob,
   FBMessageJob,
   FBOutboundJob,
+  WACMessageJob,
+  WACOutboundJob,
 } from "./types";
 
 export async function enqueueMessage(job: MessageJob): Promise<string> {
@@ -217,6 +221,29 @@ export async function enqueueFBMessage(job: FBMessageJob): Promise<string> {
 
 export async function enqueueFBOutbound(job: FBOutboundJob): Promise<string> {
   const q = getFBMOutboundQueue();
+  const result = await q.add("process", job, {
+    ...BASE_JOB_OPTIONS,
+    attempts: 4,
+    backoff: { type: "exponential", delay: 3_000 },
+  });
+  return result.id ?? "";
+}
+
+// ─── WhatsApp Cloud API producers ─────────────────────────────────────────────
+
+export async function enqueueWACMessage(job: WACMessageJob): Promise<string> {
+  const q = getWACMessageQueue();
+  const result = await q.add("process", job, {
+    ...BASE_JOB_OPTIONS,
+    ...RETRY_OPTIONS,
+    // Deduplicate: same wamid must never be processed twice
+    jobId: `wac:${job.wamid}`,
+  });
+  return result.id ?? "";
+}
+
+export async function enqueueWACOutbound(job: WACOutboundJob): Promise<string> {
+  const q = getWACOutboundQueue();
   const result = await q.add("process", job, {
     ...BASE_JOB_OPTIONS,
     attempts: 4,

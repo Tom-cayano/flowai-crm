@@ -30,6 +30,9 @@ export const QUEUE_NAMES = {
   // ─── Facebook Messenger ────────────────────────────────────────────────
   FBM_MESSAGE:    "fbm:message",    // Inbound Messenger message pipeline
   FBM_OUTBOUND:   "fbm:outbound",   // Outbound Messenger message sending
+  // ─── WhatsApp Cloud API (direct, not Evolution) ────────────────────────
+  WAC_MESSAGE:    "wac:message",    // Inbound Cloud API message pipeline
+  WAC_OUTBOUND:   "wac:outbound",   // Outbound Cloud API message sending
 } as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];
@@ -84,6 +87,10 @@ export interface AutomationJob {
   igCommentId?: string;
   igMediaId?:   string;
   igUserId?:    string;
+  // WhatsApp Cloud API context (optional — only set for WAC triggers)
+  wacAccountId?: string;   // whatsapp_cloud_accounts.id (UUID)
+  // Facebook Messenger context (optional — only set for Messenger triggers)
+  fbmPageId?:    string;   // facebook_pages.page_id
 }
 
 /**
@@ -298,6 +305,50 @@ export interface FBOutboundJob {
   /** Pre-written CRM messages row — update external_id after send when present. */
   messageId?:     string;
   origin:         "automation" | "manual" | "ai_reply";
+}
+
+// ─── WhatsApp Cloud API job payloads ─────────────────────────────────────────
+
+/**
+ * Inbound Cloud API message event.
+ * One job per message in the "messages" array of the webhook entry.
+ */
+export interface WACMessageJob {
+  accountId:      string;   // whatsapp_cloud_accounts.id (UUID)
+  userId:         string;
+  workspaceId:    string;
+  phoneNumberId:  string;   // from webhook metadata
+  wabaId:         string;   // WABA ID (entry.id in webhook)
+  from:           string;   // sender's phone number (E.164 without +)
+  senderName:     string | null;
+  wamid:          string;   // Meta message ID — idempotency key
+  type:           string;   // "text" | "image" | "audio" | "video" | "document" | "sticker" | ...
+  text:           string | null;
+  mediaId?:       string;   // for media messages
+  mediaMimeType?: string;
+  mediaCaption?:  string;
+  latitude?:      number;   // for location messages
+  longitude?:     number;
+  timestamp:      number;   // unix seconds from Meta
+  isEcho:         boolean;  // true = sent by the business itself
+  receivedAt:     string;   // ISO — end-to-end latency tracking
+}
+
+/**
+ * Outbound Cloud API message send.
+ * Rate-limited — keep concurrency low (WAC limits: 250 msgs/sec per WABA).
+ */
+export interface WACOutboundJob {
+  accountId:      string;   // whatsapp_cloud_accounts.id (UUID)
+  userId:         string;
+  to:             string;   // recipient's phone (E.164 without +)
+  content:        string;
+  conversationId: string;
+  /** Pre-written CRM messages row — patch external_id after send when present */
+  messageId?:     string;
+  origin:         "automation" | "manual" | "ai_reply" | "campaign";
+  templateName?:  string;   // set when type = "template"
+  languageCode?:  string;   // e.g. "es" — required with templateName
 }
 
 // ─── Job result shapes ────────────────────────────────────────────────────────

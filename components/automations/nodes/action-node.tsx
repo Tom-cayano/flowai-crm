@@ -33,6 +33,7 @@ const ACTION_ICONS: Record<ActionType, React.ElementType> = {
   assign_instagram_lead:   UserCheck,
   add_instagram_tag:       Tag,
   escalate_to_whatsapp:    RefreshCw,
+  send_messenger_message:  Send,
 };
 
 const ACTION_COLORS: Record<ActionType, { border: string; bg: string; icon: string; label: string }> = {
@@ -58,6 +59,7 @@ const ACTION_COLORS: Record<ActionType, { border: string; bg: string; icon: stri
   assign_instagram_lead:   { border: "border-pink-500/50 hover:border-pink-500",      bg: "bg-pink-500/10 border-b border-pink-500/20",    icon: "bg-pink-500",    label: "text-pink-400" },
   add_instagram_tag:       { border: "border-pink-500/50 hover:border-pink-500",      bg: "bg-pink-500/10 border-b border-pink-500/20",    icon: "bg-pink-500",    label: "text-pink-400" },
   escalate_to_whatsapp:    { border: "border-green-500/50 hover:border-green-500",    bg: "bg-green-500/10 border-b border-green-500/20",  icon: "bg-green-500",   label: "text-green-400" },
+  send_messenger_message:  { border: "border-blue-500/50 hover:border-blue-500",      bg: "bg-blue-500/10 border-b border-blue-500/20",    icon: "bg-blue-500",    label: "text-blue-400" },
 };
 
 const ACTION_LABELS: Record<ActionType, string> = {
@@ -83,6 +85,7 @@ const ACTION_LABELS: Record<ActionType, string> = {
   assign_instagram_lead:   "Asignar lead Instagram",
   add_instagram_tag:       "Etiquetar en Instagram",
   escalate_to_whatsapp:    "Escalar a WhatsApp",
+  send_messenger_message:  "Enviar mensaje Messenger",
 };
 
 function describeAction(data: ActionNodeData): string {

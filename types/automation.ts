@@ -44,7 +44,7 @@ export interface TriggerConfig {
   cronExpression?: string;
   timezone?: string;
   // filter by channel
-  channel?: "whatsapp" | "instagram" | "email" | "sms" | "any";
+  channel?: "whatsapp" | "instagram" | "messenger" | "email" | "sms" | "any";
   // instagram_comment_received — filter by media type
   igMediaType?: "IMAGE" | "VIDEO" | "REEL" | "any";
   // instagram account scope (undefined = all connected accounts)
@@ -131,7 +131,9 @@ export type ActionType =
   | "reply_instagram_comment"  // reply to a specific comment publicly
   | "assign_instagram_lead"    // tag contact as an Instagram lead
   | "add_instagram_tag"        // add tag specific to Instagram channel
-  | "escalate_to_whatsapp";    // open a WhatsApp conversation for the same contact
+  | "escalate_to_whatsapp"     // open a WhatsApp conversation for the same contact
+  // ─── Messenger actions ───────────────────────────────────────────────────
+  | "send_messenger_message";  // send a Messenger reply to the current conversation
 
 export interface SendMessageAction {
   type: "send_message";
@@ -260,6 +262,12 @@ export interface EscalateToWhatsAppAction {
   message?: string;       // optional first message to send
 }
 
+export interface SendMessengerMessageAction {
+  type: "send_messenger_message";
+  content: string;   // supports {{contact.name}} template vars
+  delayMs?: number;
+}
+
 export type ActionConfig =
   | SendMessageAction
   | SendTemplateAction
@@ -282,7 +290,8 @@ export type ActionConfig =
   | ReplyInstagramCommentAction
   | AssignInstagramLeadAction
   | AddInstagramTagAction
-  | EscalateToWhatsAppAction;
+  | EscalateToWhatsAppAction
+  | SendMessengerMessageAction;
 
 // ─── Workflow graph (stored as JSON in automations.workflow) ──────────────────
 
@@ -432,6 +441,10 @@ export interface ExecutionContext {
   igMediaId?:     string;   // media ID the comment was on
   igUserId?:      string;   // sender's Instagram scoped user ID
   igUsername?:    string;   // sender's Instagram username (may be null)
+  // ─── WhatsApp Cloud API context (populated for wac:* instanceNames) ──────
+  wacAccountId?:  string;   // whatsapp_cloud_accounts.id (UUID)
+  // ─── Facebook Messenger context ──────────────────────────────────────────
+  fbmPageId?:     string;   // facebook_pages.page_id
 }
 
 // ─── AI types ─────────────────────────────────────────────────────────────────

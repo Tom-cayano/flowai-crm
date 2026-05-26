@@ -104,6 +104,7 @@ export async function processMessengerMessage(job: FBMessageJob): Promise<void> 
     serverUrl:      "",
     instanceApiKey: "",
     triggerType:    isFirstMessage ? "first_message" : "message_received",
+    fbmPageId:      job.pageId,
   }).catch((err) => console.warn("[fbm-msg] enqueueAutomation failed:", err));
 }
 

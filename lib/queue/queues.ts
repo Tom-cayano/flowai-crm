@@ -23,6 +23,8 @@ import type {
   IGTokenJob,
   FBMessageJob,
   FBOutboundJob,
+  WACMessageJob,
+  WACOutboundJob,
 } from "./types";
 
 // ─── Default job options ──────────────────────────────────────────────────────
@@ -61,6 +63,10 @@ let igTokenQueue:    Queue<IGTokenJob>    | null = null;
 let fbmMessageQueue:  Queue<FBMessageJob>  | null = null;
 let fbmOutboundQueue: Queue<FBOutboundJob> | null = null;
 
+// ─── WhatsApp Cloud API singletons ────────────────────────────────────────────
+let wacMessageQueue:  Queue<WACMessageJob>  | null = null;
+let wacOutboundQueue: Queue<WACOutboundJob> | null = null;
+
 function conn() {
   return { connection: getRedis() };
 }
@@ -84,5 +90,8 @@ export function getIGTokenQueue():    Queue<IGTokenJob>    { return (igTokenQueu
 
 export function getFBMMessageQueue():  Queue<FBMessageJob>  { return (fbmMessageQueue  ??= new Queue(QUEUE_NAMES.FBM_MESSAGE,  conn())); }
 export function getFBMOutboundQueue(): Queue<FBOutboundJob> { return (fbmOutboundQueue ??= new Queue(QUEUE_NAMES.FBM_OUTBOUND, conn())); }
+
+export function getWACMessageQueue():  Queue<WACMessageJob>  { return (wacMessageQueue  ??= new Queue(QUEUE_NAMES.WAC_MESSAGE,  conn())); }
+export function getWACOutboundQueue(): Queue<WACOutboundJob> { return (wacOutboundQueue ??= new Queue(QUEUE_NAMES.WAC_OUTBOUND, conn())); }
 
 export { BASE_JOB_OPTIONS, RETRY_OPTIONS };

@@ -5,7 +5,7 @@
 // to runMatchingAutomations. They must run server-side (worker or server action).
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { runMatchingAutomations } from "./engine";
+import { runMatchingAutomations } from "./engine.js";
 import type { ExecutionContext, TriggerType } from "@/types/automation";
 
 // ─── Instance resolution helper ───────────────────────────────────────────────
@@ -75,11 +75,6 @@ async function buildCtxForConversation(
 
 // ─── Public dispatch functions ────────────────────────────────────────────────
 
-/**
- * Dispatches when a conversation's status changes.
- * Called from the action-executor update_status action and from any direct
- * status-change API routes.
- */
 export async function dispatchStatusChanged(opts: {
   userId:         string;
   conversationId: string;
@@ -104,10 +99,6 @@ export async function dispatchStatusChanged(opts: {
   );
 }
 
-/**
- * Dispatches when a tag is added to a contact.
- * Called from add_tag action and from the contacts API.
- */
 export async function dispatchTagAdded(opts: {
   userId:         string;
   contactId:      string;
@@ -127,9 +118,6 @@ export async function dispatchTagAdded(opts: {
   );
 }
 
-/**
- * Dispatches when a tag is removed from a contact.
- */
 export async function dispatchTagRemoved(opts: {
   userId:         string;
   contactId:      string;
@@ -149,9 +137,6 @@ export async function dispatchTagRemoved(opts: {
   );
 }
 
-/**
- * Dispatches when a new contact is created.
- */
 export async function dispatchContactCreated(opts: {
   userId:    string;
   contactId: string;
@@ -161,7 +146,6 @@ export async function dispatchContactCreated(opts: {
   const db = createAdminClient();
   const creds = await resolveInstanceCredentials(opts.userId);
 
-  // Find the conversation for this contact if one exists
   const { data: conv } = await db
     .from("conversations")
     .select("id")
@@ -192,10 +176,6 @@ export async function dispatchContactCreated(opts: {
   );
 }
 
-/**
- * Dispatches when a contact's lead score crosses a threshold.
- * Called from lib/ai/lead-scorer.ts after every score update.
- */
 export async function dispatchLeadScoreThreshold(opts: {
   userId:         string;
   contactId:      string;
@@ -220,9 +200,6 @@ export async function dispatchLeadScoreThreshold(opts: {
   );
 }
 
-/**
- * Dispatches when a new conversation is created (first-contact flow).
- */
 export async function dispatchConversationCreated(opts: {
   userId:         string;
   conversationId: string;
@@ -241,10 +218,6 @@ export async function dispatchConversationCreated(opts: {
   );
 }
 
-/**
- * Dispatches no_response_timeout for a conversation that has been waiting
- * longer than the configured timeout with no agent reply.
- */
 export async function dispatchNoResponseTimeout(opts: {
   userId:         string;
   conversationId: string;
@@ -262,10 +235,6 @@ export async function dispatchNoResponseTimeout(opts: {
   );
 }
 
-/**
- * Dispatches a scheduled_cron trigger for a specific automation.
- * Called by the cron runner with all contacts in scope.
- */
 export async function dispatchScheduledCron(opts: {
   userId:       string;
   automationId: string;

@@ -10,6 +10,12 @@
 //   6. Inserts CRM message
 //   7. Updates conversation preview + unread_count
 //   8. Enqueues AutomationJob with trigger type "message_received"
+//
+// PLAN-1 (GAP-1 fix):
+//   checkAndRecordEvent now stores { sender_id: psid } in raw_payload.
+//   This enables sendMessage() in lib/actions/conversations.ts to resolve
+//   which facebook_page a given PSID belongs to, fixing multi-page outbound.
+//   No schema change — raw_payload is JSONB with default '{}' (column already exists).
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { enqueueAutomation } from "@/lib/queue/producers";
@@ -36,7 +42,15 @@ export async function processMessengerMessage(job: FBMessageJob): Promise<void> 
   const { userId, workspaceId } = owner;
 
   // ── Idempotency guard ──────────────────────────────────────────────────────
-  const alreadyProcessed = await checkAndRecordEvent(db, job.mid, "message", job.pageId);
+  // PLAN-1: pass job.senderId so raw_payload captures the PSID→page_id mapping.
+  // This is used by sendMessage() to route outbound replies to the correct page.
+  const alreadyProcessed = await checkAndRecordEvent(
+    db,
+    job.mid,
+    "message",
+    job.pageId,
+    job.senderId,
+  );
   if (alreadyProcessed) {
     console.info(`[fbm-msg] Duplicate mid ${job.mid} — skipping`);
     return;
@@ -134,17 +148,32 @@ async function resolvePage(
   return null;
 }
 
+/**
+ * Record the webhook event for idempotency.
+ *
+ * Returns true if the event was already processed (unique constraint violation).
+ *
+ * PLAN-1: senderId is stored in raw_payload.sender_id.
+ * This creates a queryable PSID → page_id index inside the existing JSONB column,
+ * enabling sendMessage() to resolve which page owns a given PSID for outbound routing.
+ *
+ * raw_payload schema: { sender_id: string }
+ * Column type: JSONB NOT NULL DEFAULT '{}' — no migration required.
+ */
 async function checkAndRecordEvent(
   db:        DB,
   eventId:   string,
   eventType: string,
   pageId:    string,
+  senderId?: string,
 ): Promise<boolean> {
   const { error } = await db.from("messenger_webhook_events").insert({
-    event_id:   eventId,
-    event_type: eventType,
-    page_id:    pageId,
-    raw_payload: {},
+    event_id:    eventId,
+    event_type:  eventType,
+    page_id:     pageId,
+    // Store PSID so sendMessage() can later look up pageId → PSID direction.
+    // Falls back to empty object for non-message events (no senderId passed).
+    raw_payload: senderId !== undefined ? { sender_id: senderId } : {},
   });
   // Unique constraint on event_id = already processed
   return !!error;

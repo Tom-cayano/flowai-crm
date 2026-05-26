@@ -32,22 +32,22 @@ import { recordFailure } from "@/lib/observability/dlq";
 import { captureQueueSnapshot, pruneOldSnapshots, recordJobCompleted } from "@/lib/observability/metrics";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-import { processMessage }    from "./processors/message.processor";
-import { processStatus }     from "./processors/status.processor";
-import { processMedia }      from "./processors/media.processor";
-import { processAutomation } from "./processors/automation.processor";
-import { processOutbound }   from "./processors/outbound.processor";
-import { processConnection } from "./processors/connection.processor";
-import { processSession }    from "./processors/session.processor";
-import { processScheduled }  from "./processors/scheduled.processor";
-import { processTrigger }    from "./processors/trigger.processor";
-import { processAI }         from "./processors/ai.processor";
-import { processIGMessage }         from "./processors/instagram-message.processor";
-import { processIGOutbound }        from "./processors/instagram-outbound.processor";
-import { processIGComment }         from "./processors/instagram-comment.processor";
+import { processMessage }    from "./processors/message.processor.js";
+import { processStatus }     from "./processors/status.processor.js";
+import { processMedia }      from "./processors/media.processor.js";
+import { processAutomation } from "./processors/automation.processor.js";
+import { processOutbound }   from "./processors/outbound.processor.js";
+import { processConnection } from "./processors/connection.processor.js";
+import { processSession }    from "./processors/session.processor.js";
+import { processScheduled }  from "./processors/scheduled.processor.js";
+import { processTrigger }    from "./processors/trigger.processor.js";
+import { processAI }         from "./processors/ai.processor.js";
+import { processIGMessage }         from "./processors/instagram-message.processor.js";
+import { processIGOutbound }        from "./processors/instagram-outbound.processor.js";
+import { processIGComment }         from "./processors/instagram-comment.processor.js";
 import { maybeRefreshToken }        from "@/lib/instagram/token-store";
-import { processMessengerMessage }  from "./processors/messenger-message.processor";
-import { processMessengerOutbound } from "./processors/messenger-outbound.processor";
+import { processMessengerMessage }  from "./processors/messenger-message.processor.js";
+import { processMessengerOutbound } from "./processors/messenger-outbound.processor.js";
 
 import type {
   MessageJob, StatusJob, MediaJob, AutomationJob,

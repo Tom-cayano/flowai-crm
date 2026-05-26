@@ -2,8 +2,8 @@
 // reply before it reaches the customer. Also enforces custom keyword blocklist.
 // Fast and cheap: omni-moderation-latest has no per-token cost.
 
-import { getOpenAI } from "./client";
-import { recordUsage } from "./metering";
+import { getOpenAI } from "./client.js";
+import { recordUsage } from "./metering.js";
 
 export interface ModerationResult {
   flagged:    boolean;

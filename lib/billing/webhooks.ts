@@ -4,15 +4,22 @@
 // IDEMPOTENCY: Every Stripe event has a unique `id`. We check
 // billing_events.stripe_event_id (UNIQUE constraint) BEFORE running any sync.
 // This means Stripe retries are safely ignored without double-processing.
+//
+// TYPE NOTES (stripe@22 / API 2026-04-22.dahlia):
+//   - event.data.object is Record<string,unknown> — requires `as unknown as Stripe.X`
+//   - Invoice/Subscription.customer is string|Customer|DeletedCustomer — use extractCustomerId()
+//   - next_payment_attempt removed from Stripe.Invoice in 2026-04-22.dahlia
+//   - SubscriptionItem.current_period_end requires explicit cast for TS compatibility
 
 import type Stripe from "stripe";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { syncSubscriptionFromStripe, recordBillingEvent } from "./subscriptions";
+import { syncSubscriptionFromStripe, recordBillingEvent } from "./subscriptions.js";
 import { createLogger } from "@/lib/observability/logger";
 
 const log = createLogger("billing:webhooks");
 
-// Stripe price ID → plan ID mapping (configure in env)
+// ─── Stripe price ID → plan ID mapping ───────────────────────────────────────
+
 function resolvePlanId(priceId: string): string {
   const map: Record<string, string> = {
     [process.env.STRIPE_PRICE_STARTER_MONTHLY  ?? "price_starter_m"]:  "starter",
@@ -24,6 +31,28 @@ function resolvePlanId(priceId: string): string {
   };
   return map[priceId] ?? "starter";
 }
+
+// ─── Type helpers ─────────────────────────────────────────────────────────────
+
+/**
+ * Stripe.Invoice.customer and Stripe.Subscription.customer are both
+ * `string | Stripe.Customer | Stripe.DeletedCustomer | null` in SDK v22.
+ * This helper always returns the plain string ID.
+ */
+function extractCustomerId(
+  customer:
+    | string
+    | Stripe.Customer
+    | Stripe.DeletedCustomer
+    | null
+    | undefined,
+): string | null {
+  if (typeof customer === "string") return customer;
+  if (customer && typeof customer === "object" && "id" in customer) return customer.id;
+  return null;
+}
+
+// ─── DB lookups ───────────────────────────────────────────────────────────────
 
 async function getWorkspaceByCustomer(customerId: string): Promise<string | null> {
   const db = createAdminClient();
@@ -46,8 +75,6 @@ async function getWorkspaceBySubscription(subscriptionId: string): Promise<strin
 }
 
 // ─── Idempotency guard ────────────────────────────────────────────────────────
-// Returns true if the event was already processed (billing_events UNIQUE on
-// stripe_event_id). Callers must return early when this is true.
 
 async function isAlreadyProcessed(eventId: string): Promise<boolean> {
   const db = createAdminClient();
@@ -64,8 +91,6 @@ async function isAlreadyProcessed(eventId: string): Promise<boolean> {
 export async function handleStripeWebhook(event: Stripe.Event): Promise<void> {
   log.info("stripe webhook received", { type: event.type, eventId: event.id });
 
-  // Idempotency — skip if we've already processed this event.
-  // Stripe retries on 5xx, so this protects against double-processing.
   if (await isAlreadyProcessed(event.id)) {
     log.info("skipping duplicate stripe event", { eventId: event.id, type: event.type });
     return;
@@ -74,10 +99,9 @@ export async function handleStripeWebhook(event: Stripe.Event): Promise<void> {
   switch (event.type) {
 
     // ── Checkout completed ────────────────────────────────────────────────────
-    // Associates the Stripe customer with the workspace if not already done.
-    // The subscription data itself arrives via customer.subscription.created.
     case "checkout.session.completed": {
-      const session = event.data.object as Stripe.Checkout.Session;
+      // SDK v22: event.data.object is Record<string,unknown> — double-cast required
+      const session = event.data.object as unknown as Stripe.Checkout.Session;
       const workspaceId = session.metadata?.workspace_id;
 
       if (!workspaceId) {
@@ -87,21 +111,21 @@ export async function handleStripeWebhook(event: Stripe.Event): Promise<void> {
         return;
       }
 
-      if (session.customer) {
+      const customerId = extractCustomerId(session.customer);
+      if (customerId) {
         await syncSubscriptionFromStripe({
           workspaceId,
-          stripeCustomerId: session.customer as string,
-          // subscription_id comes from customer.subscription.created — don't duplicate
+          stripeCustomerId: customerId,
         });
       }
 
       await recordBillingEvent({
         workspaceId,
-        eventType:      event.type,
-        stripeEventId:  event.id,
-        payload:        {
+        eventType:     event.type,
+        stripeEventId: event.id,
+        payload: {
           session_id:   session.id,
-          customer:     session.customer,
+          customer:     extractCustomerId(session.customer),
           subscription: session.subscription,
           mode:         session.mode,
         },
@@ -112,56 +136,57 @@ export async function handleStripeWebhook(event: Stripe.Event): Promise<void> {
     // ── Subscription created / updated ────────────────────────────────────────
     case "customer.subscription.created":
     case "customer.subscription.updated": {
-      const sub = event.data.object as Stripe.Subscription;
+      const sub = event.data.object as unknown as Stripe.Subscription;
+      const customerId  = extractCustomerId(sub.customer);
       const workspaceId = (sub.metadata?.workspace_id as string | undefined)
-        ?? await getWorkspaceByCustomer(sub.customer as string);
+        ?? (customerId ? await getWorkspaceByCustomer(customerId) : null);
 
       if (!workspaceId) {
         log.warn("no workspace found for subscription", { subscriptionId: sub.id });
         return;
       }
 
-      const item      = sub.items.data[0];
-      const priceId   = item?.price.id ?? "";
-      const interval  = item?.price.recurring?.interval ?? "month";
-      // In API version ≥ 2026-04-22 current_period_end lives on SubscriptionItem
-      const periodEnd = item?.current_period_end;
-      const planId    = resolvePlanId(priceId);
+      const item     = sub.items.data[0];
+      const priceId  = item?.price.id ?? "";
+      const interval = item?.price.recurring?.interval ?? "month";
+
+      // In API 2025-01-27.acacia+ current_period_end lives on SubscriptionItem.
+      // Cast through unknown to handle SDK type-generation lag for this property.
+      const periodEnd = item
+        ? (item as unknown as { current_period_end?: number }).current_period_end
+        : undefined;
+
+      const planId = resolvePlanId(priceId);
 
       await syncSubscriptionFromStripe({
         workspaceId,
         planId,
         status:               sub.status,
-        stripeCustomerId:     sub.customer as string,
+        stripeCustomerId:     customerId ?? undefined,
         stripeSubscriptionId: sub.id,
         currentPeriodEnd:     periodEnd ? new Date(periodEnd * 1000) : null,
         trialEndsAt:          sub.trial_end ? new Date(sub.trial_end * 1000) : null,
         billingInterval:      interval === "year" ? "yearly" : "monthly",
       });
 
-      // On downgrade, clear the grace period since we now have a clean state
       if (event.type === "customer.subscription.updated") {
         log.info("subscription updated", {
-          workspaceId,
-          newPlan:  planId,
-          status:   sub.status,
-          interval,
+          workspaceId, newPlan: planId, status: sub.status, interval,
         });
       }
 
       await recordBillingEvent({
         workspaceId,
-        eventType:      event.type,
-        stripeEventId:  event.id,
-        payload:        { subscription_id: sub.id, status: sub.status, plan: planId },
+        eventType:     event.type,
+        stripeEventId: event.id,
+        payload:       { subscription_id: sub.id, status: sub.status, plan: planId },
       });
       break;
     }
 
     // ── Subscription deleted (canceled) ───────────────────────────────────────
-    // Downgrade to starter + set grace period (7 days to let customers fix payment).
     case "customer.subscription.deleted": {
-      const sub         = event.data.object as Stripe.Subscription;
+      const sub         = event.data.object as unknown as Stripe.Subscription;
       const workspaceId = await getWorkspaceBySubscription(sub.id);
 
       if (workspaceId) {
@@ -169,23 +194,27 @@ export async function handleStripeWebhook(event: Stripe.Event): Promise<void> {
 
         await syncSubscriptionFromStripe({
           workspaceId,
-          status:          "canceled",
-          planId:          "starter",
+          status:           "canceled",
+          planId:           "starter",
           currentPeriodEnd: gracePeriodEnd,
         });
 
-        // Write grace period to workspaces table
         const db = createAdminClient();
         await db
           .from("workspaces")
           .update({ grace_period_ends_at: gracePeriodEnd.toISOString() })
           .eq("id", workspaceId);
 
+        // cancellation_details.reason is a string | null in SDK v22
+        const cancelReason =
+          (sub.cancellation_details as { reason?: string | null } | null | undefined)
+            ?.reason ?? null;
+
         await recordBillingEvent({
           workspaceId,
           eventType:     event.type,
           stripeEventId: event.id,
-          payload:       { subscription_id: sub.id, cancellation_reason: sub.cancellation_details?.reason ?? null },
+          payload:       { subscription_id: sub.id, cancellation_reason: cancelReason },
         });
 
         log.info("subscription canceled — grace period set", {
@@ -198,11 +227,11 @@ export async function handleStripeWebhook(event: Stripe.Event): Promise<void> {
 
     // ── Invoice paid ──────────────────────────────────────────────────────────
     case "invoice.paid": {
-      const inv         = event.data.object as Stripe.Invoice;
-      const workspaceId = await getWorkspaceByCustomer(inv.customer as string);
+      const inv         = event.data.object as unknown as Stripe.Invoice;
+      const customerId  = extractCustomerId(inv.customer);
+      const workspaceId = customerId ? await getWorkspaceByCustomer(customerId) : null;
 
       if (workspaceId) {
-        // Clear grace period and reactivate if it was past_due
         const db = createAdminClient();
         await db
           .from("workspaces")
@@ -214,7 +243,11 @@ export async function handleStripeWebhook(event: Stripe.Event): Promise<void> {
           workspaceId,
           eventType:     event.type,
           stripeEventId: event.id,
-          payload:       { amount_paid: inv.amount_paid, invoice_id: inv.id, invoice_number: inv.number },
+          payload: {
+            amount_paid:    inv.amount_paid,
+            invoice_id:     inv.id,
+            invoice_number: inv.number,
+          },
         });
       }
       break;
@@ -222,37 +255,43 @@ export async function handleStripeWebhook(event: Stripe.Event): Promise<void> {
 
     // ── Invoice payment failed ────────────────────────────────────────────────
     case "invoice.payment_failed": {
-      const inv         = event.data.object as Stripe.Invoice;
-      const workspaceId = await getWorkspaceByCustomer(inv.customer as string);
+      const inv         = event.data.object as unknown as Stripe.Invoice;
+      const customerId  = extractCustomerId(inv.customer);
+      const workspaceId = customerId ? await getWorkspaceByCustomer(customerId) : null;
 
       if (workspaceId) {
         await syncSubscriptionFromStripe({ workspaceId, status: "past_due" });
+
+        // attempt_count exists on Invoice in all API versions.
+        // next_payment_attempt was removed in 2026-04-22.dahlia — safe access via unknown.
+        const invRecord = inv as unknown as Record<string, unknown>;
+
         await recordBillingEvent({
           workspaceId,
           eventType:     event.type,
           stripeEventId: event.id,
-          payload:       {
-            invoice_id:      inv.id,
-            attempt_count:   inv.attempt_count,
-            next_payment_attempt: inv.next_payment_attempt,
+          payload: {
+            invoice_id:           inv.id,
+            attempt_count:        invRecord["attempt_count"] ?? null,
+            next_payment_attempt: invRecord["next_payment_attempt"] ?? null,
           },
         });
 
         log.warn("invoice payment failed", {
           workspaceId,
           invoiceId:    inv.id,
-          attemptCount: inv.attempt_count,
+          attemptCount: invRecord["attempt_count"],
         });
       }
       break;
     }
 
-    // ── Trial ending soon (3 days before) ────────────────────────────────────
-    // Record the event so it can trigger email notifications via a job queue.
+    // ── Trial ending soon ─────────────────────────────────────────────────────
     case "customer.subscription.trial_will_end": {
-      const sub = event.data.object as Stripe.Subscription;
+      const sub        = event.data.object as unknown as Stripe.Subscription;
+      const customerId = extractCustomerId(sub.customer);
       const workspaceId = (sub.metadata?.workspace_id as string | undefined)
-        ?? await getWorkspaceByCustomer(sub.customer as string);
+        ?? (customerId ? await getWorkspaceByCustomer(customerId) : null);
 
       if (workspaceId) {
         const daysRemaining = sub.trial_end
@@ -263,7 +302,7 @@ export async function handleStripeWebhook(event: Stripe.Event): Promise<void> {
           workspaceId,
           eventType:     event.type,
           stripeEventId: event.id,
-          payload:       {
+          payload: {
             subscription_id: sub.id,
             trial_end:       sub.trial_end,
             days_remaining:  daysRemaining,

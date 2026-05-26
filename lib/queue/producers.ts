@@ -21,7 +21,7 @@ import {
   getFBMOutboundQueue,
   BASE_JOB_OPTIONS,
   RETRY_OPTIONS,
-} from "./queues";
+} from "./queues.js";
 import type {
   MessageJob,
   StatusJob,
@@ -40,7 +40,7 @@ import type {
   IGTokenJob,
   FBMessageJob,
   FBOutboundJob,
-} from "./types";
+} from "./types.js";
 
 export async function enqueueMessage(job: MessageJob): Promise<string> {
   const q = getMessageQueue();

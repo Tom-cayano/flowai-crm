@@ -2,8 +2,8 @@
 // Embeds message content with text-embedding-3-small and stores in pgvector.
 // Called asynchronously after a reply is sent — never blocks the AI pipeline.
 
-import { getOpenAI } from "./client";
-import { recordUsage } from "./metering";
+import { getOpenAI } from "./client.js";
+import { recordUsage } from "./metering.js";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 const EMBED_MODEL = "text-embedding-3-small";

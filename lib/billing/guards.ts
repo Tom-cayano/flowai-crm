@@ -3,9 +3,9 @@
 // All functions throw BillingError on violation so callers can catch and
 // return an appropriate HTTP response without duplicating logic.
 
-import { getWorkspaceSubscription } from "./subscriptions";
-import { isWithinQuota } from "./usage";
-import { planHasFeature } from "./plans";
+import { getWorkspaceSubscription } from "./subscriptions.js";
+import { isWithinQuota } from "./usage.js";
+import { planHasFeature } from "./plans.js";
 import type { PlanFeature, PlanId } from "@/types/billing";
 
 export class BillingError extends Error {

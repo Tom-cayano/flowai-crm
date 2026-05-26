@@ -2,8 +2,8 @@
 // Distinct from lead-scorer.ts (which tracks numeric score history);
 // this module produces a structured qualification report from a conversation snapshot.
 
-import { getOpenAI } from "./client";
-import { recordUsage } from "./metering";
+import { getOpenAI } from "./client.js";
+import { recordUsage } from "./metering.js";
 
 const QUALIFY_MODEL = "gpt-4o-mini";
 

@@ -4,7 +4,7 @@
 
 import { Queue } from "bullmq";
 import { getRedis } from "@/lib/redis/client";
-import { QUEUE_NAMES } from "./types";
+import { QUEUE_NAMES } from "./types.js";
 import type {
   MessageJob,
   StatusJob,
@@ -23,7 +23,7 @@ import type {
   IGTokenJob,
   FBMessageJob,
   FBOutboundJob,
-} from "./types";
+} from "./types.js";
 
 // ─── Default job options ──────────────────────────────────────────────────────
 

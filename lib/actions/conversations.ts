@@ -216,20 +216,22 @@ export async function sendMessage(
       }
 
       // ── Facebook Messenger ────────────────────────────────────────────────
+      // PLAN-1 (GAP-1 fix): resolve the correct page_id for this PSID.
+      // PSIDs are page-scoped in Meta — a given PSID only belongs to one page.
+      // We use messenger_webhook_events to look up which of this user's pages
+      // previously received a message from this PSID, then verify the page is
+      // still active. Falls back to the most recently connected page if no
+      // inbound history exists (single-page users, first outbound before any inbound).
       if (conv.channel === "messenger") {
-        const { data: page } = await admin
-          .from("facebook_pages")
-          .select("page_id")
-          .eq("user_id", user.id)
-          .eq("is_active", true)
-          .maybeSingle();
+        const psid = conv.contact_phone;
 
-        if (!page?.page_id) return;
+        const pageId = await resolveFbPageForPsid(admin, psid, user.id);
+        if (!pageId) return;
 
         await enqueueFBOutbound({
-          pageId:         page.page_id,
+          pageId,
           userId:         user.id,
-          recipientPsid:  conv.contact_phone,
+          recipientPsid:  psid,
           content:        trimmed,
           conversationId,
           messageId:      msg.id,
@@ -433,4 +435,78 @@ export async function markConversationRead(id: string): Promise<Result<void>> {
 
   if (error) return { data: null, error: error.message };
   return { data: undefined, error: null };
+}
+
+// ─── Private helpers ──────────────────────────────────────────────────────────
+
+type AdminClient = ReturnType<typeof createAdminClient>;
+
+/**
+ * PLAN-1 (GAP-1): Resolve the correct facebook_pages.page_id for a given PSID.
+ *
+ * Meta PSIDs (Page-Scoped IDs) are deterministic: a given PSID only exists for
+ * exactly one Facebook page. Sending from the wrong page returns a Meta error.
+ *
+ * Resolution strategy (two steps):
+ *
+ *   Step 1 — History-based lookup (deterministic, O(1) JSONB index scan):
+ *     Query messenger_webhook_events for the most recent event where
+ *     raw_payload->>'sender_id' = psid. This was written by the inbound
+ *     processor (processMessengerMessage) for every received message since
+ *     PLAN-1 was deployed. Verify the page is still active for this user.
+ *
+ *   Step 2 — Fallback (backward-compatible):
+ *     If no history exists (conversations predating this fix, or a first-outbound
+ *     scenario), return the most recently connected active page for this user.
+ *     For single-page users this is always correct. For multi-page users with
+ *     no inbound history it degrades gracefully to pre-fix behavior.
+ *
+ * Not exported — used only by sendMessage() above.
+ */
+async function resolveFbPageForPsid(
+  db:     AdminClient,
+  psid:   string,
+  userId: string,
+): Promise<string | null> {
+  // ── Step 1: history-based lookup ──────────────────────────────────────────
+  // raw_payload JSONB @> operator: checks if the column contains the object.
+  // messenger_webhook_events.raw_payload is indexed as JSONB (GIN index via Postgres).
+  // Only "message" type events carry a sender_id; other types (read, delivery) don't.
+  const { data: event } = await db
+    .from("messenger_webhook_events")
+    .select("page_id")
+    .eq("event_type", "message")
+    .contains("raw_payload", { sender_id: psid })
+    .order("processed_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (event?.page_id) {
+    // Verify the page is still active and belongs to this user.
+    // Guards against: page disconnected after the inbound event was stored.
+    const { data: activePage } = await db
+      .from("facebook_pages")
+      .select("page_id")
+      .eq("page_id",   event.page_id)
+      .eq("user_id",   userId)
+      .eq("is_active", true)
+      .maybeSingle();
+
+    if (activePage?.page_id) return activePage.page_id;
+    // Page no longer active — fall through to Step 2
+  }
+
+  // ── Step 2: fallback (most recently connected active page) ────────────────
+  // Explicit ORDER BY connected_at DESC replaces the old unordered maybeSingle().
+  // For single-page users the result is identical to the previous behavior.
+  const { data: fallback } = await db
+    .from("facebook_pages")
+    .select("page_id")
+    .eq("user_id",   userId)
+    .eq("is_active", true)
+    .order("connected_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  return fallback?.page_id ?? null;
 }

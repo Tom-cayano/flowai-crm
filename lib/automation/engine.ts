@@ -14,21 +14,21 @@
 //   • Failure isolation   — per-automation try/catch; one failure does not abort others
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { evaluateTrigger } from "./trigger-evaluator";
-import { evaluateCondition, type FieldBag } from "./condition-evaluator";
-import { executeAction } from "./action-executor";
-import { scheduleWait } from "./scheduler";
+import { evaluateTrigger } from "./trigger-evaluator.js";
+import { evaluateCondition, type FieldBag } from "./condition-evaluator.js";
+import { executeAction } from "./action-executor.js";
+import { scheduleWait } from "./scheduler.js";
 import {
   isDuplicate,
   isRateLimited,
   isCancelled,
   isAutomationActive,
-} from "./execution-guard";
+} from "./execution-guard.js";
 import {
   buildEnrichedVariables,
   loadContactTags,
   loadConversationTags,
-} from "./context-builder";
+} from "./context-builder.js";
 import type {
   WorkflowGraph,
   WorkflowNode,
@@ -393,8 +393,6 @@ async function runWorkflow(
 }
 
 // ─── Side-effect dispatchers ──────────────────────────────────────────────────
-// When an action produces a secondary trigger event (e.g. add_tag triggers
-// other automations listening for tag_added), dispatch asynchronously.
 
 import type { ActionConfig } from "@/types/automation";
 
@@ -404,7 +402,7 @@ async function dispatchActionSideEffects(
 ): Promise<void> {
   try {
     const { dispatchTagAdded, dispatchTagRemoved, dispatchStatusChanged } =
-      await import("./trigger-dispatcher");
+      await import("./trigger-dispatcher.js");
 
     if (action.type === "add_tag" && ctx.contactId && ctx.conversationId) {
       void dispatchTagAdded({

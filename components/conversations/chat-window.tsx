@@ -49,6 +49,7 @@ import { MessageBubble }            from "./message-bubble";
 import { TypingIndicator }          from "./typing-indicator";
 import { AgentAssigner }            from "./agent-assigner";
 import { AICopilotPanel }           from "./ai-copilot-panel";
+import { ReplySuggestions }         from "@/components/ai/reply-suggestions";
 import { useInfiniteMessages }      from "@/lib/hooks/use-infinite-messages";
 import { useTypingIndicator }       from "@/lib/hooks/use-typing-indicator";
 import { sendMessage, updateConversationStatus } from "@/lib/actions/conversations";
@@ -437,44 +438,54 @@ export function ChatWindow({
       </AnimatePresence>
 
       {/* ── Input ── */}
-      <div className="px-4 py-3 border-t border-border bg-card shrink-0">
-        <div className="flex items-end gap-2 bg-muted rounded-xl px-3 py-2">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground mb-0.5"
-          >
-            <Paperclip className="h-4 w-4" />
-          </Button>
-          <Textarea
-            value={input}
-            onChange={handleInputChange}
-            onKeyDown={handleKeyDown}
-            placeholder="Escribe un mensaje… (Enter para enviar)"
-            className="flex-1 min-h-[36px] max-h-[120px] resize-none border-0 bg-transparent p-0 text-sm focus-visible:ring-0 shadow-none"
-            rows={1}
-            disabled={isLoading}
-          />
-          <div className="flex items-center gap-1 mb-0.5 shrink-0">
+      <div className="border-t border-border bg-card shrink-0">
+        {/* AI Reply Suggestions chips — rendered above the textarea */}
+        <ReplySuggestions
+          conversationId={conversation.id}
+          lastContactMsg={
+            messages.findLast((m) => m.sender === "contact")?.content ?? ""
+          }
+          onInsert={(text) => setInput(text)}
+        />
+        <div className="px-4 pb-3">
+          <div className="flex items-end gap-2 bg-muted rounded-xl px-3 py-2">
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7 text-muted-foreground hover:text-foreground"
+              className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground mb-0.5"
             >
-              <Smile className="h-4 w-4" />
+              <Paperclip className="h-4 w-4" />
             </Button>
-            <Button
-              size="icon"
-              className="h-7 w-7 bg-[#10b981] hover:bg-[#0ea572] text-[#030712]"
-              onClick={handleSend}
-              disabled={!input.trim() || sending || isLoading}
-            >
-              {sending ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Send className="h-3.5 w-3.5" />
-              )}
-            </Button>
+            <Textarea
+              value={input}
+              onChange={handleInputChange}
+              onKeyDown={handleKeyDown}
+              placeholder="Escribe un mensaje… (Enter para enviar)"
+              className="flex-1 min-h-[36px] max-h-[120px] resize-none border-0 bg-transparent p-0 text-sm focus-visible:ring-0 shadow-none"
+              rows={1}
+              disabled={isLoading}
+            />
+            <div className="flex items-center gap-1 mb-0.5 shrink-0">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 text-muted-foreground hover:text-foreground"
+              >
+                <Smile className="h-4 w-4" />
+              </Button>
+              <Button
+                size="icon"
+                className="h-7 w-7 bg-[#10b981] hover:bg-[#0ea572] text-[#030712]"
+                onClick={handleSend}
+                disabled={!input.trim() || sending || isLoading}
+              >
+                {sending ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Send className="h-3.5 w-3.5" />
+                )}
+              </Button>
+            </div>
           </div>
         </div>
       </div>

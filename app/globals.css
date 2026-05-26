@@ -97,6 +97,118 @@
   --brand: #10b981;
 }
 
+/* ─── Landing Design Tokens ──────────────────────────────────────────────────
+   Scoped to .landing-dark so they never bleed into the dashboard.
+   The landing page applies this class on its root div.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.landing-dark {
+  /* Void backgrounds */
+  --ld-bg:        #07070a;
+  --ld-surface-1: #0f0f14;
+  --ld-surface-2: #141418;
+  --ld-surface-3: #1a1a20;
+
+  /* Brand colors */
+  --ld-brand:     #10b981;
+  --ld-brand-mid: #34d399;
+  --ld-brand-dim: #064e3b;
+  --ld-cyan:      #06b6d4;
+  --ld-purple:    #8b5cf6;
+  --ld-amber:     #f59e0b;
+  --ld-pink:      #ec4899;
+
+  /* Channel identity */
+  --ld-ch-wa:   #10b981;
+  --ld-ch-ig:   #ec4899;
+  --ld-ch-fb:   #3b82f6;
+  --ld-ch-tt:   #e4e4e7;
+
+  /* Borders */
+  --ld-border-0: rgba(255,255,255,0.04);
+  --ld-border-1: rgba(255,255,255,0.07);
+  --ld-border-2: rgba(255,255,255,0.11);
+  --ld-border-3: rgba(255,255,255,0.16);
+
+  /* Glass layers */
+  --ld-glass-0: rgba(255,255,255,0.02);
+  --ld-glass-1: rgba(255,255,255,0.04);
+  --ld-glass-2: rgba(255,255,255,0.06);
+  --ld-glass-3: rgba(255,255,255,0.09);
+
+  /* Ambient glow opacities (applied via radial-gradient) */
+  --ld-glow-brand-sm:  rgba(16,185,129,0.06);
+  --ld-glow-brand-md:  rgba(16,185,129,0.10);
+  --ld-glow-brand-lg:  rgba(16,185,129,0.14);
+  --ld-glow-cyan-sm:   rgba(6,182,212,0.05);
+  --ld-glow-cyan-md:   rgba(6,182,212,0.08);
+  --ld-glow-purple-sm: rgba(139,92,246,0.04);
+  --ld-glow-pink-sm:   rgba(236,72,153,0.05);
+
+  /* Depth shadows */
+  --ld-shadow-sm:    0 1px 3px rgba(0,0,0,0.45), 0 1px 2px rgba(0,0,0,0.28);
+  --ld-shadow-md:    0 4px 16px rgba(0,0,0,0.55), 0 2px 4px rgba(0,0,0,0.35);
+  --ld-shadow-lg:    0 12px 40px rgba(0,0,0,0.65), 0 4px 8px rgba(0,0,0,0.45);
+  --ld-shadow-xl:    0 24px 64px rgba(0,0,0,0.70), 0 8px 16px rgba(0,0,0,0.50);
+  --ld-shadow-brand: 0 0 0 1px rgba(16,185,129,0.15), 0 8px 32px rgba(16,185,129,0.14);
+  --ld-shadow-cyan:  0 0 0 1px rgba(6,182,212,0.12),  0 8px 24px rgba(6,182,212,0.10);
+
+  /* Motion timing — used in CSS animations */
+  --ld-dur-micro:    80ms;
+  --ld-dur-fast:     150ms;
+  --ld-dur-std:      250ms;
+  --ld-dur-reveal:   500ms;
+  --ld-dur-cinematic:800ms;
+  --ld-dur-ambient: 4000ms;
+
+  --ld-ease-ui:      cubic-bezier(0.4, 0, 0.2, 1);
+  --ld-ease-reveal:  cubic-bezier(0.16, 1, 0.3, 1);
+  --ld-ease-enter:   cubic-bezier(0.21, 1.02, 0.73, 0.98);
+  --ld-ease-exit:    cubic-bezier(0.55, 0, 1, 0.45);
+}
+
+/* ─── Landing ambient animations ─────────────────────────────────────────── */
+
+@keyframes ld-float {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-6px); }
+}
+
+@keyframes ld-float-sm {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-4px); }
+}
+
+@keyframes ld-pulse-glow {
+  0%, 100% { opacity: 0.6; }
+  50%       { opacity: 1; }
+}
+
+@keyframes ld-dash-flow {
+  from { stroke-dashoffset: 24; }
+  to   { stroke-dashoffset: 0; }
+}
+
+@keyframes ld-dot-wave {
+  0%, 80%, 100% { transform: scale(0.7); opacity: 0.4; }
+  40%           { transform: scale(1);   opacity: 1;   }
+}
+
+@keyframes ld-gradient-shift {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* Reduced motion: freeze all landing animations */
+@media (prefers-reduced-motion: reduce) {
+  .landing-dark * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 * {
   border-color: var(--border);
 }
@@ -104,6 +216,18 @@
 html {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+:focus-visible {
+  outline: 2px solid rgba(16, 185, 129, 0.55);
+  outline-offset: 3px;
+  border-radius: 4px;
 }
 
 body {

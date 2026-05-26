@@ -1,31 +1,28 @@
 import type { Metadata } from "next";
+
 import { MarketingNavbar } from "@/components/marketing/navbar";
 import { Hero } from "@/components/marketing/hero";
 import { ChannelsSection } from "@/components/marketing/channels-section";
 import { AISection } from "@/components/marketing/ai-section";
 import { FeaturesV2 } from "@/components/marketing/features-v2";
-import { Testimonials } from "@/components/marketing/testimonials";
-import { Pricing } from "@/components/marketing/pricing";
 import { CtaSection } from "@/components/marketing/cta-section";
 import { Footer } from "@/components/marketing/footer";
 
 export const metadata: Metadata = {
-  title: "FlowAI CRM — El CRM con IA para WhatsApp",
+  title: "FlowAI CRM — CRM con IA para WhatsApp, Instagram y Messenger",
   description:
-    "Gestiona conversaciones de WhatsApp, automatiza respuestas con IA y convierte leads en clientes. La plataforma que usan +3.200 equipos de ventas.",
+    "Gestiona todos tus canales desde una bandeja unificada con IA. WhatsApp, Instagram, Messenger y TikTok en un solo sistema. Automatiza respuestas, cierra más ventas.",
 };
 
 export default function LandingPage() {
   return (
-    <div className="min-h-screen bg-[#09090b] text-foreground">
+    <div className="min-h-screen bg-[#07070a] text-foreground">
       <MarketingNavbar />
       <main>
         <Hero />
         <ChannelsSection />
         <AISection />
         <FeaturesV2 />
-        <Testimonials />
-        <Pricing />
         <CtaSection />
       </main>
       <Footer />

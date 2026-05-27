@@ -97,18 +97,51 @@ export async function requirePermission(
 }
 
 // ─── Resolve user's primary workspace ─────────────────────────
+//
+// FIX: Antes solo buscaba workspaces donde el user es `owner_id`.
+// Ahora también incluye workspaces donde es miembro activo.
+// Orden de prioridad: owned first → member second (por antigüedad).
 
 export async function getUserPrimaryWorkspace(userId: string): Promise<string | null> {
   const db = createAdminClient();
-  const { data } = await db
+
+  // 1. Buscar workspace propio (owner) — máxima prioridad
+  const { data: owned } = await db
     .from("workspaces")
     .select("id")
     .eq("owner_id", userId)
     .eq("is_active", true)
     .order("created_at", { ascending: true })
     .limit(1)
-    .single();
-  return data?.id ?? null;
+    .maybeSingle();
+
+  if (owned?.id) return owned.id;
+
+  // 2. Fallback: workspace donde el user es miembro activo (invitado)
+  // Dos queries simples en lugar de join anotado para evitar errores de tipos
+  // con el stub manual de supabase.ts (el generado por CLI los tendría automáticamente).
+  const { data: memberships } = await db
+    .from("workspace_members")
+    .select("workspace_id")
+    .eq("user_id", userId)
+    .eq("is_active", true)
+    .order("joined_at", { ascending: true })
+    .limit(10);
+
+  if (!memberships || memberships.length === 0) return null;
+
+  // Verificar que el workspace referenciado esté activo
+  for (const m of memberships) {
+    const { data: ws } = await db
+      .from("workspaces")
+      .select("id")
+      .eq("id", m.workspace_id)
+      .eq("is_active", true)
+      .maybeSingle();
+    if (ws?.id) return ws.id;
+  }
+
+  return null;
 }
 
 // ─── Update last_seen_at for a member ─────────────────────────

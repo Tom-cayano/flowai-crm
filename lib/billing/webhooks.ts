@@ -5,10 +5,9 @@
 // billing_events.stripe_event_id (UNIQUE constraint) BEFORE running any sync.
 // This means Stripe retries are safely ignored without double-processing.
 //
-// TYPE NOTES (stripe@22 / API 2026-04-22.dahlia):
+// TYPE NOTES (stripe SDK v22 / API 2025-01-27.acacia):
 //   - event.data.object is Record<string,unknown> — requires `as unknown as Stripe.X`
 //   - Invoice/Subscription.customer is string|Customer|DeletedCustomer — use extractCustomerId()
-//   - next_payment_attempt removed from Stripe.Invoice in 2026-04-22.dahlia
 //   - SubscriptionItem.current_period_end requires explicit cast for TS compatibility
 
 import type Stripe from "stripe";

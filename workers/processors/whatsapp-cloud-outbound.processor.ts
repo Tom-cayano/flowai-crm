@@ -1,91 +1,100 @@
-// WhatsApp Cloud API outbound message processor.
+// WhatsApp Cloud API — outbound message processor.
 //
-// Sends a text message via WhatsApp Cloud API, then:
-//   - Updates the CRM message row with external_id (wamid) and status "sent"
-//   - Updates conversation last_message_* fields
-//
-// Rate-limited by the queue (concurrency = 2, exponential backoff on failure).
+// For each WACOutboundJob it:
+//   1. Resolves credentials (phone_number_id + access_token) from whatsapp_cloud_accounts
+//   2. Sends the message via Meta Cloud API (Graph v21.0)
+//   3. Updates the pre-written CRM messages row with the wamid returned by Meta
+//   4. Marks the message as "sent"
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { sendText } from "@/lib/meta/whatsapp";
-import { decryptToken } from "@/lib/instagram/token-store";
 import type { WACOutboundJob } from "@/lib/queue/types";
 
 type DB = ReturnType<typeof createAdminClient>;
+
+const GRAPH_VERSION = "v21.0";
+
+interface WACAccount {
+  phone_number_id:    string;
+  access_token:       string;
+}
+
+interface MetaSendResponse {
+  messages?: Array<{ id: string }>;
+  error?:    { message: string; code: number };
+}
 
 // ─── Entry point ──────────────────────────────────────────────────────────────
 
 export async function processWACOutbound(job: WACOutboundJob): Promise<void> {
   const db = createAdminClient();
 
-  // ── Resolve account ────────────────────────────────────────────────────────
+  // ── Resolve account credentials ───────────────────────────────────────────
   const account = await resolveAccount(db, job.accountId);
   if (!account) {
-    throw new Error(`[wac-out] Account not found: ${job.accountId}`);
+    throw new Error(`[wac-out] No active account / credentials for accountId ${job.accountId}`);
   }
 
-  const { phoneNumberId, accessToken } = account;
+  // ── Send via Cloud API ────────────────────────────────────────────────────
+  const wamid = await sendCloudMessage(account, job.to, job.content);
 
-  // ── Send via Cloud API ─────────────────────────────────────────────────────
-  const result = await sendText(
-    phoneNumberId,
-    job.to.replace(/^\+/, ""),   // Cloud API expects E.164 without +
-    job.content,
-    accessToken,
-  );
-
-  const wamid = result.messages[0]?.id ?? null;
-
-  // ── Update CRM message row ─────────────────────────────────────────────────
-  if (job.messageId) {
-    await db.from("messages")
-      .update({
-        status:      "sent",
-        external_id: wamid,
-      })
+  // ── Update pre-written CRM message row ────────────────────────────────────
+  if (job.messageId && wamid) {
+    await db
+      .from("messages")
+      .update({ external_id: wamid, status: "sent" })
       .eq("id", job.messageId);
-  } else {
-    // No pre-existing row — insert a new sent message
-    await db.from("messages").insert({
-      conversation_id: job.conversationId,
-      content:         job.content,
-      type:            "text",
-      sender:          "agent",
-      status:          "sent",
-      external_id:     wamid,
-    });
   }
 
-  // ── Update conversation preview ────────────────────────────────────────────
-  await db.from("conversations").update({
-    last_message_preview: job.content.substring(0, 120),
-    last_message_at:      new Date().toISOString(),
-    last_message_sender:  "agent",
-    updated_at:           new Date().toISOString(),
-  }).eq("id", job.conversationId);
+  console.info(
+    `[wac-out] Sent | account=${job.accountId} to=+${job.to} wamid=${wamid}`
+  );
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-async function resolveAccount(
-  db:        DB,
-  accountId: string,
-): Promise<{ phoneNumberId: string; accessToken: string } | null> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data } = await (db as any)
+async function resolveAccount(db: DB, accountId: string): Promise<WACAccount | null> {
+  const { data } = await db
     .from("whatsapp_cloud_accounts")
-    .select("phone_number_id, access_token_enc")
+    .select("phone_number_id, access_token")
     .eq("id", accountId)
     .eq("is_active", true)
-    .maybeSingle() as { data: { phone_number_id: string; access_token_enc: string } | null };
+    .maybeSingle();
 
-  if (!data?.access_token_enc) return null;
+  if (!data?.phone_number_id || !data?.access_token) return null;
+  return data as WACAccount;
+}
 
-  try {
-    const accessToken = decryptToken(data.access_token_enc);
-    return { phoneNumberId: data.phone_number_id, accessToken };
-  } catch (err) {
-    console.error("[wac-out] Token decryption failed:", err);
-    return null;
+async function sendCloudMessage(
+  account: WACAccount,
+  to:      string,
+  text:    string,
+): Promise<string | null> {
+  const url = `https://graph.facebook.com/${GRAPH_VERSION}/${account.phone_number_id}/messages`;
+
+  const payload = {
+    messaging_product: "whatsapp",
+    recipient_type:    "individual",
+    to:                to.replace(/^\+/, ""),  // Meta expects without leading +
+    type:              "text",
+    text:              { preview_url: false, body: text },
+  };
+
+  const res = await fetch(url, {
+    method:  "POST",
+    headers: {
+      "Content-Type":  "application/json",
+      "Authorization": `Bearer ${account.access_token}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const json = (await res.json()) as MetaSendResponse;
+
+  if (!res.ok || json.error) {
+    throw new Error(
+      `[wac-out] Meta API error ${res.status}: ${json.error?.message ?? "unknown"}`
+    );
   }
+
+  return json.messages?.[0]?.id ?? null;
 }

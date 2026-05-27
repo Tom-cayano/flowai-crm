@@ -9,9 +9,9 @@ export function getStripe(): Stripe {
   if (!_stripe) {
     const key = process.env.STRIPE_SECRET_KEY;
     if (!key) throw new Error("STRIPE_SECRET_KEY is not configured");
-    // FIX: "2026-04-22.dahlia" era una versión no estándar/beta.
-    // Usar la versión estable más reciente compatible con el SDK instalado.
-    _stripe = new Stripe(key, { apiVersion: "2025-01-27.acacia" });
+    // Sin apiVersion explícita — el SDK usa su versión bundled por defecto.
+    // Evita incompatibilidades cuando el SDK actualiza su pinned version.
+    _stripe = new Stripe(key);
   }
   return _stripe;
 }

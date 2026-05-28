@@ -117,11 +117,13 @@ export async function GET() {
         method: "POST",
         headers,
         body: JSON.stringify({
-          url: WEBHOOK_URL,
-          enabled: true,
-          webhookByEvents: false,
-          webhookBase64: false,
-          events: WEBHOOK_EVENTS,
+          webhook: {
+            url: WEBHOOK_URL,
+            enabled: true,
+            webhookByEvents: false,
+            webhookBase64: false,
+            events: WEBHOOK_EVENTS,
+          },
         }),
         signal: AbortSignal.timeout(10_000),
       });

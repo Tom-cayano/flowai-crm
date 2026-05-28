@@ -9,13 +9,17 @@ export const maxDuration = 60;
 
 const WEBHOOK_URL = "https://flowai-crm.vercel.app/api/webhook/whatsapp";
 
+// Evolution API v2.3.7 valid webhook events
 const WEBHOOK_EVENTS = [
   "APPLICATION_STARTUP",
   "QRCODE_UPDATED",
+  "MESSAGES_SET",
   "MESSAGES_UPSERT",
+  "MESSAGES_EDITED",
   "MESSAGES_UPDATE",
   "MESSAGES_DELETE",
   "SEND_MESSAGE",
+  "SEND_MESSAGE_UPDATE",
   "CONTACTS_SET",
   "CONTACTS_UPSERT",
   "CONTACTS_UPDATE",
@@ -28,8 +32,6 @@ const WEBHOOK_EVENTS = [
   "GROUP_UPDATE",
   "GROUP_PARTICIPANTS_UPDATE",
   "CONNECTION_UPDATE",
-  "CALL",
-  "NEW_JWT_TOKEN",
 ];
 
 export async function GET() {

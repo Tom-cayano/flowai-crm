@@ -42,7 +42,7 @@ export async function GET() {
     // Try to enqueue a test job via BullMQ
     try {
       const { Queue } = await import("bullmq");
-      const q = new Queue("wpp:message", { connection: redis });
+      const q = new Queue("wpp-message", { connection: redis });
       const job = await q.add("test", { test: true, ts: Date.now() }, {
         jobId: `health-check-${Date.now()}`,
         removeOnComplete: { age: 60 },

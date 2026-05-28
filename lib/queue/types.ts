@@ -11,28 +11,28 @@ import type {
 // ─── Queue names ──────────────────────────────────────────────────────────────
 
 export const QUEUE_NAMES = {
-  WPP_MESSAGE:    "wpp:message",    // Inbound message pipeline
-  WPP_STATUS:     "wpp:status",     // Delivery receipt updates
-  WPP_MEDIA:      "wpp:media",      // Media download + Supabase Storage upload
-  WPP_AUTOMATION: "wpp:automation", // Automation rule evaluation
-  WPP_OUTBOUND:   "wpp:outbound",   // Outbound message sending (rate-limited)
-  WPP_CONNECTION: "wpp:connection", // Instance connection-state changes
-  WPP_SESSION:    "wpp:session",    // Periodic session health checks
-  WPP_SCHEDULED:  "wpp:scheduled",  // Delayed automation step resumption
-  WPP_TRIGGER:    "wpp:trigger",    // Non-message trigger events
-  WPP_AI:         "wpp:ai",         // AI reply generation + embeddings
+  WPP_MESSAGE:    "wpp-message",    // Inbound message pipeline
+  WPP_STATUS:     "wpp-status",     // Delivery receipt updates
+  WPP_MEDIA:      "wpp-media",      // Media download + Supabase Storage upload
+  WPP_AUTOMATION: "wpp-automation", // Automation rule evaluation
+  WPP_OUTBOUND:   "wpp-outbound",   // Outbound message sending (rate-limited)
+  WPP_CONNECTION: "wpp-connection", // Instance connection-state changes
+  WPP_SESSION:    "wpp-session",    // Periodic session health checks
+  WPP_SCHEDULED:  "wpp-scheduled",  // Delayed automation step resumption
+  WPP_TRIGGER:    "wpp-trigger",    // Non-message trigger events
+  WPP_AI:         "wpp-ai",         // AI reply generation + embeddings
   // ─── Instagram ─────────────────────────────────────────────────────────
-  IGM_MESSAGE:    "igm:message",    // Inbound Instagram DM pipeline
-  IGM_OUTBOUND:   "igm:outbound",   // Outbound DM sending (rate-limited)
-  IGM_COMMENT:    "igm:comment",    // Instagram comment event processing
-  IGM_MEDIA:      "igm:media",      // Media download from Meta CDN → Storage
-  IGM_TOKEN:      "igm:token",      // Long-lived token refresh jobs
+  IGM_MESSAGE:    "igm-message",    // Inbound Instagram DM pipeline
+  IGM_OUTBOUND:   "igm-outbound",   // Outbound DM sending (rate-limited)
+  IGM_COMMENT:    "igm-comment",    // Instagram comment event processing
+  IGM_MEDIA:      "igm-media",      // Media download from Meta CDN → Storage
+  IGM_TOKEN:      "igm-token",      // Long-lived token refresh jobs
   // ─── Facebook Messenger ────────────────────────────────────────────────
-  FBM_MESSAGE:    "fbm:message",    // Inbound Messenger message pipeline
-  FBM_OUTBOUND:   "fbm:outbound",   // Outbound Messenger message sending
+  FBM_MESSAGE:    "fbm-message",    // Inbound Messenger message pipeline
+  FBM_OUTBOUND:   "fbm-outbound",   // Outbound Messenger message sending
   // ─── WhatsApp Cloud API (direct, not Evolution) ────────────────────────
-  WAC_MESSAGE:    "wac:message",    // Inbound Cloud API message pipeline
-  WAC_OUTBOUND:   "wac:outbound",   // Outbound Cloud API message sending
+  WAC_MESSAGE:    "wac-message",    // Inbound Cloud API message pipeline
+  WAC_OUTBOUND:   "wac-outbound",   // Outbound Cloud API message sending
 } as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];

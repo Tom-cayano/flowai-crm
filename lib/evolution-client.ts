@@ -316,8 +316,9 @@ export class EvolutionClient {
     instanceName: string,
     webhook: {
       url: string;
-      byEvents?: boolean;
-      base64?: boolean;
+      enabled?: boolean;
+      webhookByEvents?: boolean;
+      webhookBase64?: boolean;
       events?: string[];
     }
   ): Promise<EvolutionResponse<unknown>> {
@@ -325,7 +326,15 @@ export class EvolutionClient {
       this.config,
       "POST",
       `/webhook/set/${encodeURIComponent(instanceName)}`,
-      { webhook }
+      {
+        webhook: {
+          enabled: webhook.enabled ?? true,
+          url: webhook.url,
+          webhookByEvents: webhook.webhookByEvents ?? false,
+          webhookBase64: webhook.webhookBase64 ?? false,
+          events: webhook.events ?? [],
+        },
+      }
     );
   }
 

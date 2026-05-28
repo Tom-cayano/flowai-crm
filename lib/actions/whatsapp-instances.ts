@@ -109,8 +109,8 @@ export async function createInstance(payload: {
   await evoClient
     .setWebhook(instanceName, {
       url: webhookUrl,
-      byEvents: false,
-      base64: false,
+      webhookByEvents: false,
+      webhookBase64: false,
       events: [
         "MESSAGES_UPSERT",
         "MESSAGES_UPDATE",

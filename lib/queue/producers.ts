@@ -52,7 +52,7 @@ export async function enqueueMessage(job: MessageJob): Promise<string> {
     ...BASE_JOB_OPTIONS,
     ...RETRY_OPTIONS,
     // Deduplicate: same WhatsApp message ID shouldn't be processed twice
-    jobId: `msg:${job.data.key?.id ?? Date.now()}`,
+    jobId: `msg-${job.data.key?.id ?? Date.now()}`,
   });
   return result.id ?? "";
 }
@@ -101,7 +101,7 @@ export async function enqueueMedia(job: MediaJob): Promise<string> {
     ...BASE_JOB_OPTIONS,
     attempts: 3,
     backoff: { type: "exponential", delay: 5_000 },
-    jobId: `media:${job.externalId}`,
+    jobId: `media-${job.externalId}`,
   });
   return result.id ?? "";
 }
@@ -112,7 +112,7 @@ export async function enqueueSession(job: SessionJob): Promise<string> {
     ...BASE_JOB_OPTIONS,
     attempts: 2,
     backoff: { type: "fixed", delay: 5_000 },
-    jobId: `session:${job.instanceName}:${job.action}`,
+    jobId: `session-${job.instanceName}-${job.action}`,
   });
   return result.id ?? "";
 }
@@ -127,7 +127,7 @@ export async function enqueueScheduled(
     delay: delayMs,
     attempts: 3,
     backoff: { type: "fixed", delay: 5_000 },
-    jobId: `scheduled:${job.taskId}`,
+    jobId: `scheduled-${job.taskId}`,
   });
   return result.id ?? "";
 }
@@ -159,7 +159,7 @@ export async function enqueueIGMessage(job: IGMessageJob): Promise<string> {
     ...BASE_JOB_OPTIONS,
     ...RETRY_OPTIONS,
     // Deduplicate: same Meta message ID must never be processed twice
-    jobId: `igm:${job.mid}`,
+    jobId: `igm-${job.mid}`,
   });
   return result.id ?? "";
 }
@@ -179,7 +179,7 @@ export async function enqueueIGComment(job: IGCommentJob): Promise<string> {
   const result = await q.add("process", job, {
     ...BASE_JOB_OPTIONS,
     ...RETRY_OPTIONS,
-    jobId: `igc:${job.commentId}`,
+    jobId: `igc-${job.commentId}`,
   });
   return result.id ?? "";
 }
@@ -190,7 +190,7 @@ export async function enqueueIGMedia(job: IGMediaJob): Promise<string> {
     ...BASE_JOB_OPTIONS,
     attempts: 3,
     backoff: { type: "exponential", delay: 5_000 },
-    jobId: `igmedia:${job.mid}`,
+    jobId: `igmedia-${job.mid}`,
   });
   return result.id ?? "";
 }
@@ -201,7 +201,7 @@ export async function enqueueIGTokenRefresh(job: IGTokenJob): Promise<string> {
     ...BASE_JOB_OPTIONS,
     attempts: 3,
     backoff: { type: "exponential", delay: 10_000 },
-    jobId: `igtoken:${job.accountId}`,
+    jobId: `igtoken-${job.accountId}`,
   });
   return result.id ?? "";
 }
@@ -214,7 +214,7 @@ export async function enqueueFBMessage(job: FBMessageJob): Promise<string> {
     ...BASE_JOB_OPTIONS,
     ...RETRY_OPTIONS,
     // Deduplicate: same Meta message ID must never be processed twice
-    jobId: `fbm:${job.mid}`,
+    jobId: `fbm-${job.mid}`,
   });
   return result.id ?? "";
 }
@@ -237,7 +237,7 @@ export async function enqueueWACMessage(job: WACMessageJob): Promise<string> {
     ...BASE_JOB_OPTIONS,
     ...RETRY_OPTIONS,
     // Deduplicate: same wamid must never be processed twice
-    jobId: `wac:${job.wamid}`,
+    jobId: `wac-${job.wamid}`,
   });
   return result.id ?? "";
 }

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { evolutionClient, extractQRBase64 } from "@/lib/evolution/client";
+import { getEvolutionClient } from "@/lib/evolution-client";
 import type { Tables, TablesUpdate } from "@/types/supabase";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -36,6 +36,21 @@ async function getAuthenticatedUser() {
   return { supabase, user };
 }
 
+/**
+ * Extracts a human-readable error message from the new EvolutionClient response.
+ * The new client returns { ok: false, status, data } where data may contain
+ * an error/message field from the Evolution API JSON response.
+ */
+function extractEvoError(data: unknown, status: number): string {
+  if (typeof data === "object" && data !== null) {
+    const d = data as Record<string, unknown>;
+    if (typeof d.message === "string") return d.message;
+    if (typeof d.error === "string") return d.error;
+  }
+  if (typeof data === "string") return data;
+  return `HTTP ${status}`;
+}
+
 // ─── Read ─────────────────────────────────────────────────────────────────────
 
 export async function getInstances(): Promise<Result<WhatsAppInstance[]>> {
@@ -56,52 +71,87 @@ export async function getInstances(): Promise<Result<WhatsAppInstance[]>> {
 
 export async function createInstance(payload: {
   label: string;
-  serverUrl: string;
-  apiKey: string;
+  serverUrl?: string;
+  apiKey?: string;
 }): Promise<Result<WhatsAppInstance>> {
   const { supabase, user } = await getAuthenticatedUser();
   if (!user) return { data: null, error: "No autenticado" };
 
   const label = payload.label.trim();
   if (!label) return { data: null, error: "El nombre de la instancia es obligatorio" };
-  if (!payload.serverUrl.trim()) return { data: null, error: "La URL del servidor es obligatoria" };
-  if (!payload.apiKey.trim()) return { data: null, error: "La API Key es obligatoria" };
 
   const instanceName = makeInstanceName(user.id, label);
 
-  // 1. Create the instance on Evolution API
-  const evoClient = evolutionClient(payload.serverUrl, payload.apiKey);
-  const evoResult = await evoClient.createInstance(instanceName, { qrcode: true });
+  // 1. Build Evolution client (reads EVOLUTION_SERVER_URL + EVOLUTION_API_KEY from ENV)
+  const rawApiKey    = process.env.EVOLUTION_API_KEY ?? "";
+  const rawServerUrl = process.env.EVOLUTION_SERVER_URL ?? "";
 
-  if (!evoResult.ok) {
-    return { data: null, error: `Evolution API: ${evoResult.error}` };
-  }
-
-  // 2. Register the CRM webhook on the new instance
-  const webhookUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? "https://flowaicrm.com"}/api/webhook/whatsapp`;
-  await evoClient.setWebhook(instanceName, {
-    enabled: true,
-    url: webhookUrl,
-    webhook_by_events: false,
-    webhook_base64: false,
-    events: [
-      "MESSAGES_UPSERT",
-      "MESSAGES_UPDATE",
-      "MESSAGES_DELETE",
-      "CONNECTION_UPDATE",
-      "SEND_MESSAGE",
-      "PRESENCE_UPDATE",
-    ],
+  console.log("[EVOLUTION DEBUG] createInstance action", {
+    instanceName,
+    url: `${rawServerUrl}/instance/create`,
+    hasApiKey:    !!rawApiKey,
+    apiKeyLength: rawApiKey.trim().length,
+    headers: { apikey: rawApiKey ? rawApiKey.trim().slice(0, 6) + "…" : "MISSING" },
   });
 
-  // 3. Persist the instance in Supabase
+  let evoClient;
+  try {
+    evoClient = getEvolutionClient();
+  } catch (err) {
+    return { data: null, error: err instanceof Error ? err.message : String(err) };
+  }
+
+  // 2. Create the instance on Evolution API
+  const evoResult = await evoClient.createInstance({
+    instanceName,
+    qrcode: true,
+    integration: "WHATSAPP-BAILEYS",
+  });
+
+  console.log("[EVOLUTION DEBUG] createInstance result", {
+    ok: evoResult.ok,
+    status: evoResult.status,
+    data: JSON.stringify(evoResult.data).slice(0, 300),
+  });
+
+  if (!evoResult.ok) {
+    return {
+      data: null,
+      error: `Evolution API: ${extractEvoError(evoResult.data, evoResult.status)}`,
+    };
+  }
+
+  // 3. Register the CRM webhook on the new instance
+  const webhookUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? "https://flowaicrm.com"}/api/webhook/whatsapp`;
+  await evoClient
+    .setWebhook(instanceName, {
+      url: webhookUrl,
+      webhookByEvents: false,
+      webhookBase64: false,
+      events: [
+        "MESSAGES_UPSERT",
+        "MESSAGES_UPDATE",
+        "MESSAGES_DELETE",
+        "CONNECTION_UPDATE",
+        "SEND_MESSAGE",
+        "PRESENCE_UPDATE",
+      ],
+    })
+    .catch((err) =>
+      console.warn("[whatsapp-instances] setWebhook failed (non-blocking):", err)
+    );
+
+  // 4. Persist the instance in Supabase — store canonical ENV values, not user input
+  const serverUrl = process.env.EVOLUTION_SERVER_URL ?? "";
+  const apiKey = process.env.EVOLUTION_API_KEY ?? "";
+
   const { data, error } = await supabase
     .from("whatsapp_instances")
     .insert({
       user_id: user.id,
       instance_name: instanceName,
-      server_url: payload.serverUrl.trim().replace(/\/$/, ""),
-      api_key: payload.apiKey.trim(),
+      server_url: serverUrl.replace(/\/$/, ""),
+      api_key: apiKey,
       label,
       connection_state: "close" as const,
       is_active: true,
@@ -126,10 +176,10 @@ export async function deleteInstance(instanceId: string): Promise<Result<void>> 
   const { supabase, user } = await getAuthenticatedUser();
   if (!user) return { data: null, error: "No autenticado" };
 
-  // Fetch instance to get credentials before deleting from DB
+  // Fetch instance name before deleting from DB
   const { data: instance, error: fetchErr } = await supabase
     .from("whatsapp_instances")
-    .select("instance_name, server_url, api_key")
+    .select("instance_name")
     .eq("id", instanceId)
     .eq("user_id", user.id)
     .single();
@@ -139,10 +189,14 @@ export async function deleteInstance(instanceId: string): Promise<Result<void>> 
   }
 
   // Delete from Evolution API first (non-blocking on failure)
-  const evoClient = evolutionClient(instance.server_url, instance.api_key);
-  await evoClient.deleteInstance(instance.instance_name).catch((err) =>
-    console.warn("[whatsapp-instances] Evolution delete failed (continuing):", err)
-  );
+  try {
+    const evoClient = getEvolutionClient();
+    await evoClient.deleteInstance(instance.instance_name).catch((err) =>
+      console.warn("[whatsapp-instances] Evolution delete failed (continuing):", err)
+    );
+  } catch (err) {
+    console.warn("[whatsapp-instances] Evolution client unavailable during delete:", err);
+  }
 
   // Delete from Supabase (cascades to conversations etc. via FK)
   const { error } = await supabase
@@ -165,7 +219,7 @@ export async function disconnectInstance(instanceId: string): Promise<Result<voi
 
   const { data: instance, error: fetchErr } = await supabase
     .from("whatsapp_instances")
-    .select("instance_name, server_url, api_key")
+    .select("instance_name")
     .eq("id", instanceId)
     .eq("user_id", user.id)
     .single();
@@ -174,11 +228,21 @@ export async function disconnectInstance(instanceId: string): Promise<Result<voi
     return { data: null, error: "Instancia no encontrada" };
   }
 
-  const evoClient = evolutionClient(instance.server_url, instance.api_key);
-  const result = await evoClient.logout(instance.instance_name);
+  let evoClient;
+  try {
+    evoClient = getEvolutionClient();
+  } catch (err) {
+    return { data: null, error: err instanceof Error ? err.message : String(err) };
+  }
+
+  // New client uses logoutInstance (not logout)
+  const result = await evoClient.logoutInstance(instance.instance_name);
 
   if (!result.ok) {
-    return { data: null, error: result.error };
+    return {
+      data: null,
+      error: extractEvoError(result.data, result.status),
+    };
   }
 
   // Update local state — webhook will update connection_state when Evolution fires
@@ -202,7 +266,7 @@ export async function syncInstanceState(instanceId: string): Promise<Result<{
 
   const { data: instance, error: fetchErr } = await supabase
     .from("whatsapp_instances")
-    .select("instance_name, server_url, api_key")
+    .select("instance_name")
     .eq("id", instanceId)
     .eq("user_id", user.id)
     .single();
@@ -211,14 +275,23 @@ export async function syncInstanceState(instanceId: string): Promise<Result<{
     return { data: null, error: "Instancia no encontrada" };
   }
 
-  const evoClient = evolutionClient(instance.server_url, instance.api_key);
+  let evoClient;
+  try {
+    evoClient = getEvolutionClient();
+  } catch (err) {
+    return { data: null, error: err instanceof Error ? err.message : String(err) };
+  }
+
   const stateResult = await evoClient.getConnectionState(instance.instance_name);
 
   if (!stateResult.ok) {
-    return { data: null, error: stateResult.error };
+    return {
+      data: null,
+      error: extractEvoError(stateResult.data, stateResult.status),
+    };
   }
 
-  const state = stateResult.data.instance.state;
+  const state = stateResult.data.instance.state as "open" | "close" | "connecting";
 
   await supabase
     .from("whatsapp_instances")
@@ -239,7 +312,7 @@ export async function getInstanceQR(instanceId: string): Promise<Result<{
 
   const { data: instance, error: fetchErr } = await supabase
     .from("whatsapp_instances")
-    .select("instance_name, server_url, api_key, connection_state")
+    .select("instance_name, connection_state")
     .eq("id", instanceId)
     .eq("user_id", user.id)
     .single();
@@ -252,14 +325,24 @@ export async function getInstanceQR(instanceId: string): Promise<Result<{
     return { data: null, error: "ALREADY_CONNECTED" };
   }
 
-  const evoClient = evolutionClient(instance.server_url, instance.api_key);
+  let evoClient;
+  try {
+    evoClient = getEvolutionClient();
+  } catch (err) {
+    return { data: null, error: err instanceof Error ? err.message : String(err) };
+  }
+
   const qrResult = await evoClient.getQRCode(instance.instance_name);
 
   if (!qrResult.ok) {
-    return { data: null, error: qrResult.error };
+    return {
+      data: null,
+      error: extractEvoError(qrResult.data, qrResult.status),
+    };
   }
 
-  const base64 = extractQRBase64(qrResult.data);
+  // Extract base64 directly from EvolutionQRCode — no extractQRBase64 helper needed
+  const base64 = qrResult.data.base64 ?? null;
   if (!base64) {
     return { data: null, error: "QR não disponível — tente novamente em alguns segundos" };
   }

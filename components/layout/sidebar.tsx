@@ -29,6 +29,15 @@ function InstagramIcon({ className, style }: { className?: string; style?: React
     </svg>
   );
 }
+
+// Messenger brand icon
+function MessengerIcon({ className, style }: { className?: string; style?: React.CSSProperties }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} style={style} fill="currentColor">
+      <path d="M12 2C6.36 2 2 6.13 2 11.7c0 2.91 1.19 5.44 3.14 7.17.16.13.26.31.27.51l.05 1.6c.04.51.57.82 1.04.6l1.79-.78c.15-.07.32-.08.48-.03.79.22 1.63.33 2.5.33 5.64 0 10-4.13 10-9.7S17.64 2 12 2zm5.98 7.28l-2.93 4.65c-.47.73-1.47.92-2.17.4l-2.33-1.75c-.21-.16-.51-.16-.72 0l-3.14 2.38c-.42.32-.96-.17-.68-.62l2.93-4.65c.47-.73 1.47-.92 2.17-.4l2.33 1.75c.21.16.51.16.72 0l3.14-2.38c.42-.32.96.17.68.62z" />
+    </svg>
+  );
+}
 import { cn, getInitials } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -42,6 +51,7 @@ const navItems = [
   { href: "/contacts",     label: "Contactos",        icon: Users },
   { href: "/whatsapp",     label: "WhatsApp",         icon: Smartphone },
   { href: "/instagram",   label: "Instagram",        icon: InstagramIcon },
+  { href: "/messenger",   label: "Messenger",        icon: MessengerIcon },
   { href: "/campaigns",    label: "Campañas",         icon: Megaphone },
   { href: "/automations",  label: "Automatizaciones", icon: Zap },
   { href: "/marketplace",  label: "Marketplace",      icon: Store },
@@ -49,10 +59,12 @@ const navItems = [
 ];
 
 const bottomItems = [
-  { href: "/settings/team",        label: "Equipo",          icon: UserCog },
-  { href: "/settings/billing",     label: "Facturación",     icon: CreditCard },
-  { href: "/settings/white-label", label: "White Label",     icon: Settings },
-  { href: "/settings",             label: "Configuración",   icon: Settings },
+  { href: "/settings/integrations/meta", label: "Integraciones",   icon: Zap },
+  { href: "/settings/channels",          label: "Canales",          icon: Smartphone },
+  { href: "/settings/team",              label: "Equipo",           icon: UserCog },
+  { href: "/settings/billing",           label: "Facturación",      icon: CreditCard },
+  { href: "/settings/white-label",       label: "White Label",      icon: Settings },
+  { href: "/settings",                   label: "Configuración",    icon: Settings },
 ];
 
 interface SidebarProps {

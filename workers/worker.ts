@@ -48,12 +48,15 @@ import { processIGComment }         from "./processors/instagram-comment.process
 import { maybeRefreshToken }        from "@/lib/instagram/token-store";
 import { processMessengerMessage }  from "./processors/messenger-message.processor";
 import { processMessengerOutbound } from "./processors/messenger-outbound.processor";
+import { processWACMessage }        from "./processors/whatsapp-cloud-message.processor";
+import { processWACOutbound }       from "./processors/whatsapp-cloud-outbound.processor";
 
 import type {
   MessageJob, StatusJob, MediaJob, AutomationJob,
   OutboundJob, ConnectionJob, SessionJob, ScheduledJob, TriggerJob, AIJob,
   IGMessageJob, IGOutboundJob, IGCommentJob, IGMediaJob, IGTokenJob,
   FBMessageJob, FBOutboundJob,
+  WACMessageJob, WACOutboundJob,
 } from "@/lib/queue/types";
 
 // ─── Identity ─────────────────────────────────────────────────────────────────
@@ -84,6 +87,9 @@ const CONCURRENCY = {
   // Facebook Messenger
   fbmMessage:  Number(process.env.WORKER_CONCURRENCY_FBM_MESSAGE  ?? 5),
   fbmOutbound: Number(process.env.WORKER_CONCURRENCY_FBM_OUTBOUND ?? 2),
+  // WhatsApp Cloud API — keep outbound low (rate limits per WABA)
+  wacMessage:  Number(process.env.WORKER_CONCURRENCY_WAC_MESSAGE  ?? 5),
+  wacOutbound: Number(process.env.WORKER_CONCURRENCY_WAC_OUTBOUND ?? 2),
 };
 
 // ─── Worker factory ───────────────────────────────────────────────────────────
@@ -190,6 +196,9 @@ async function start(): Promise<void> {
     // Facebook Messenger
     createWorker<FBMessageJob> (QUEUE_NAMES.FBM_MESSAGE,    (j) => processMessengerMessage(j.data),  CONCURRENCY.fbmMessage),
     createWorker<FBOutboundJob>(QUEUE_NAMES.FBM_OUTBOUND,   (j) => processMessengerOutbound(j.data), CONCURRENCY.fbmOutbound),
+    // WhatsApp Cloud API
+    createWorker<WACMessageJob> (QUEUE_NAMES.WAC_MESSAGE,   (j) => processWACMessage(j.data),        CONCURRENCY.wacMessage),
+    createWorker<WACOutboundJob>(QUEUE_NAMES.WAC_OUTBOUND,  (j) => processWACOutbound(j.data),       CONCURRENCY.wacOutbound),
   ];
 
   log.info("queues online", { queues: Object.values(QUEUE_NAMES) });

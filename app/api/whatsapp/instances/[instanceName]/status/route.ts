@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { evolutionClient } from "@/lib/evolution/client";
+import { getEvolutionClient } from "@/lib/evolution-client";
 
 export async function GET(
   _request: NextRequest,
@@ -22,9 +22,10 @@ export async function GET(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // Verify ownership — we no longer need server_url/api_key from DB
   const { data: instance, error } = await supabase
     .from("whatsapp_instances")
-    .select("server_url, api_key")
+    .select("id")
     .eq("instance_name", instanceName)
     .eq("user_id", user.id)
     .single();
@@ -33,14 +34,27 @@ export async function GET(
     return NextResponse.json({ error: "Instance not found" }, { status: 404 });
   }
 
-  const client = evolutionClient(instance.server_url, instance.api_key);
+  let client;
+  try {
+    client = getEvolutionClient();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[status/route] Evolution client init error:", msg);
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+
   const result = await client.getConnectionState(instanceName);
 
   if (!result.ok) {
-    return NextResponse.json({ error: result.error }, { status: 502 });
+    const errMsg =
+      typeof result.data === "object" && result.data !== null && "message" in result.data
+        ? String((result.data as { message: string }).message)
+        : `HTTP ${result.status}`;
+    return NextResponse.json({ error: errMsg }, { status: 502 });
   }
 
-  const state = result.data.instance.state;
+  const rawState = result.data.instance.state;
+  const state = rawState as "open" | "close" | "connecting";
 
   // Keep DB in sync (webhook may not fire immediately on connect)
   await supabase

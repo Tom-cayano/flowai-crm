@@ -38,6 +38,7 @@ import { MessageBubble } from "./message-bubble";
 import { TypingIndicator } from "./typing-indicator";
 import { AgentAssigner } from "./agent-assigner";
 import { AICopilotPanel } from "./ai-copilot-panel";
+import { ReplySuggestions } from "@/components/ai/reply-suggestions";
 import { useInfiniteMessages } from "@/lib/hooks/use-infinite-messages";
 import { useTypingIndicator } from "@/lib/hooks/use-typing-indicator";
 import { sendMessage, updateConversationStatus } from "@/lib/actions/conversations";
@@ -440,6 +441,13 @@ export function ChatWindow({
           />
         )}
       </AnimatePresence>
+
+      {/* ── Inline reply suggestions ── */}
+      <ReplySuggestions
+        conversationId={conversation.id}
+        lastContactMsg={messages.findLast((m) => m.sender === "contact")?.content ?? ""}
+        onInsert={(text) => setInput(text)}
+      />
 
       {/* ── Input area ── */}
       <div className="px-4 py-3 border-t border-border bg-card shrink-0">

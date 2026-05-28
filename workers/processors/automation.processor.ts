@@ -36,6 +36,10 @@ export async function processAutomation(job: AutomationJob): Promise<void> {
     igCommentId: job.igCommentId,
     igMediaId:   job.igMediaId,
     igUserId:    job.igUserId,
+    // WhatsApp Cloud API context
+    wacAccountId: job.wacAccountId,
+    // Facebook Messenger context
+    fbmPageId:    job.fbmPageId,
   };
 
   await runMatchingAutomations(ctx);

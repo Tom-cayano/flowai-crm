@@ -1,10 +1,10 @@
-// FlowAI CRM — WhatsApp Webhook (Evolution API)
+// FlowAI CRM — Evolution API Webhook
 //
-// This route is intentionally THIN. It validates, parses, and enqueues.
-// All processing (DB writes, automations, media) happens in the worker.
-//
-// Response time target: <50ms
-// This ensures Evolution API does not retry due to timeouts.
+// Architecture: intentionally THIN.
+// This route validates, logs, and enqueues. All DB writes and automations
+// run in background workers so the HTTP response stays under 50 ms.
+// Evolution retries any non-2xx response — returning 200 always prevents
+// duplicate job creation.
 
 import { NextRequest, NextResponse } from "next/server";
 import {
@@ -19,66 +19,140 @@ import type {
   EvolutionConnectionUpdate,
 } from "@/types/evolution";
 
+// Required for node:crypto (timingSafeEqual) and queue libraries that use
+// Node.js built-ins. Not compatible with the Vercel Edge Runtime.
+export const runtime = "nodejs";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+// Mirrors the shape Evolution API sends for a send.message event
+interface EvolutionSendMessageData {
+  key: {
+    remoteJid: string;
+    fromMe: boolean;
+    id: string;
+    participant?: string;
+  };
+  message?: Record<string, unknown>;
+  messageType?: string;
+  messageTimestamp?: number;
+  instanceId?: string;
+  source?: string;
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const WEBHOOK_SECRET = process.env.EVOLUTION_WEBHOOK_SECRET ?? "";
 
-// ─── Health check ─────────────────────────────────────────────────────────────
+// ─── GET — health / verification ─────────────────────────────────────────────
 
 export async function GET(request: NextRequest) {
-  const challenge = request.nextUrl.searchParams.get("hub.challenge");
-  const token     = request.nextUrl.searchParams.get("hub.verify_token");
+  // Hub-style challenge used by some webhook verification flows
+  const challenge   = request.nextUrl.searchParams.get("hub.challenge");
+  const verifyToken = request.nextUrl.searchParams.get("hub.verify_token");
 
-  if (challenge && token === WEBHOOK_SECRET) {
+  if (challenge && verifyToken === WEBHOOK_SECRET) {
+    console.log("[webhook/whatsapp] GET — challenge accepted");
     return new Response(challenge, { status: 200 });
   }
 
-  return NextResponse.json({ status: "ok", service: "FlowAI CRM — WhatsApp Webhook" });
+  return NextResponse.json({
+    success: true,
+    service: "FlowAI CRM — WhatsApp Webhook",
+    timestamp: new Date().toISOString(),
+  });
 }
 
-// ─── Event receiver ───────────────────────────────────────────────────────────
+// ─── POST — event receiver ────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
+  const receivedAt = new Date().toISOString();
+
+  // ── 1. Parse JSON ────────────────────────────────────────────────────────
   let body: Record<string, unknown>;
 
   try {
     body = (await request.json()) as Record<string, unknown>;
   } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    console.warn("[webhook/whatsapp] Invalid JSON body");
+    return NextResponse.json({ success: false, error: "Invalid JSON" }, { status: 400 });
   }
 
-  const payload = body as unknown as EvolutionWebhookPayload;
+  const payload    = body as unknown as EvolutionWebhookPayload;
+  const rawEvent   = (payload.event ?? "") as string;
+  const event      = normalizeEventName(rawEvent);
+  const instance   = (payload.instance ?? "unknown") as string;
 
-  // ── Verify secret ─────────────────────────────────────────────────────────
+  // ── 2. Verify secret ──────────────────────────────────────────────────────
   if (!verifySecret(request, payload.apikey)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    console.warn("[webhook/whatsapp] Rejected — invalid secret", { instance, event });
+    return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
   }
 
-  const event      = normalizeEventName((payload.event ?? "") as string);
-  const instance   = (payload.instance ?? "") as string;
-  const receivedAt = new Date().toISOString();
+  // ── 3. Log every incoming event ───────────────────────────────────────────
+  console.log("[webhook/whatsapp] Event received", {
+    event,
+    rawEvent,
+    instance,
+    receivedAt,
+    destination: payload.destination ?? null,
+    sender:      payload.sender ?? null,
+  });
 
-  // Always return 200 — Evolution retries on any non-2xx which creates duplicates
+  // ── 4. Dispatch by event type ─────────────────────────────────────────────
+  // Always return 200 — wrap dispatch in try/catch so queue errors never
+  // cause Evolution to retry (which would create duplicate messages).
   try {
     switch (event) {
+
+      // ── Inbound message received ──────────────────────────────────────────
       case "messages.upsert": {
         const items = resolveMessageArray(payload.data);
+
+        console.log("[webhook/whatsapp] MESSAGES_UPSERT", {
+          instance,
+          count:     items.length,
+          messageIds: items.map((m) => m.key?.id).filter(Boolean),
+          fromMe:    items.map((m) => m.key?.fromMe),
+          types:     items.map((m) => m.messageType),
+        });
+
         await Promise.all(
-          items.map((data) => enqueueMessage({ instanceName: instance, data, receivedAt }))
+          items.map((data) =>
+            enqueueMessage({ instanceName: instance, data, receivedAt })
+          )
         );
         break;
       }
 
+      // ── Message status update (sent / delivered / read) ───────────────────
       case "messages.update": {
         const updates = Array.isArray(payload.data)
           ? (payload.data as EvolutionStatusUpdate[])
           : [payload.data as unknown as EvolutionStatusUpdate];
+
+        console.log("[webhook/whatsapp] MESSAGES_UPDATE", {
+          instance,
+          count:      updates.length,
+          messageIds: updates.map((u) => u.key?.id).filter(Boolean),
+          statuses:   updates.map((u) => u.update?.status),
+        });
+
         await enqueueStatus({ instanceName: instance, updates });
         break;
       }
 
+      // ── WhatsApp session state change ─────────────────────────────────────
       case "connection.update": {
         const connData = payload.data as EvolutionConnectionUpdate;
+        const newState = connData?.state ?? "unknown";
+
+        console.log("[webhook/whatsapp] CONNECTION_UPDATE", {
+          instance,
+          state:        newState,
+          statusReason: connData?.statusReason ?? null,
+        });
+
         if (connData?.state) {
           await enqueueConnection({
             instanceName: instance,
@@ -88,28 +162,82 @@ export async function POST(request: NextRequest) {
         break;
       }
 
-      // Acknowledged but not queued — avoids Evolution retrying unknown events
-      default:
+      // ── Message sent BY the connected number ──────────────────────────────
+      case "send.message": {
+        const sendData = payload.data as EvolutionSendMessageData;
+
+        console.log("[webhook/whatsapp] SEND_MESSAGE", {
+          instance,
+          messageId:  sendData?.key?.id ?? null,
+          remoteJid:  sendData?.key?.remoteJid ?? null,
+          fromMe:     sendData?.key?.fromMe ?? null,
+          type:       sendData?.messageType ?? null,
+          timestamp:  sendData?.messageTimestamp ?? null,
+        });
+
+        // SEND_MESSAGE fires when the Evolution-connected number sends a
+        // message from another device (phone, web, etc.). Enqueue as a
+        // standard upsert so the conversation is updated consistently.
+        await enqueueMessage({
+          instanceName: instance,
+          data:         sendData as unknown as EvolutionMessageData,
+          receivedAt,
+        });
         break;
+      }
+
+      // ── QR code refreshed (informational — no action needed) ─────────────
+      case "qrcode.updated": {
+        console.log("[webhook/whatsapp] QRCODE_UPDATED", { instance });
+        break;
+      }
+
+      // ── All other events — acknowledge without processing ─────────────────
+      default: {
+        console.log("[webhook/whatsapp] Unhandled event (acknowledged)", { event, instance });
+        break;
+      }
     }
   } catch (err) {
-    // Log but always return 200
-    console.error(`[webhook] Queue error for event "${event}":`, err);
+    // Log but still return 200 — prevents Evolution from retrying
+    console.error("[webhook/whatsapp] Queue error", {
+      event,
+      instance,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
-  return NextResponse.json({ received: true });
+  return NextResponse.json({ success: true });
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/**
+ * Normalizes Evolution API event names to lowercase dot-notation.
+ * v1 sends "messages.upsert"; v2 sends "MESSAGES_UPSERT".
+ * Both become "messages.upsert" after this function.
+ */
 function normalizeEventName(event: string): string {
   return event.toLowerCase().replace(/_/g, ".");
 }
 
+/**
+ * Verifies the request comes from our configured Evolution API instance.
+ * Accepts the secret in three locations Evolution v2 may use:
+ *   1. apikey header
+ *   2. x-webhook-secret header
+ *   3. Authorization: Bearer <secret> header
+ *   4. apikey field inside the JSON payload body
+ *
+ * If EVOLUTION_WEBHOOK_SECRET is not set, all requests are accepted
+ * (with a warning in production so it's visible in logs).
+ */
 function verifySecret(request: NextRequest, payloadApiKey?: string): boolean {
   if (!WEBHOOK_SECRET) {
     if (process.env.NODE_ENV === "production") {
-      console.warn("[webhook] EVOLUTION_WEBHOOK_SECRET not set — endpoint unprotected");
+      console.warn(
+        "[webhook/whatsapp] EVOLUTION_WEBHOOK_SECRET is not set — endpoint is unprotected"
+      );
     }
     return true;
   }
@@ -123,25 +251,34 @@ function verifySecret(request: NextRequest, payloadApiKey?: string): boolean {
 }
 
 /**
- * Evolution API sends messages.upsert in multiple shapes across versions.
- * Normalise all of them to EvolutionMessageData[].
+ * Evolution API delivers messages.upsert data in multiple shapes across
+ * versions. This function normalises all of them to EvolutionMessageData[].
+ *
+ *   v1 shape:  payload.data = [ messageObject, ... ]
+ *   v2 shape:  payload.data = { messages: [ messageObject, ... ] }
+ *   v2 single: payload.data = messageObject  (has "key" field)
  */
 function resolveMessageArray(rawData: unknown): EvolutionMessageData[] {
+  if (!rawData) return [];
+
+  // Array of messages (most common — v1 and v2)
   if (Array.isArray(rawData)) {
     return rawData as EvolutionMessageData[];
   }
 
-  if (rawData && typeof rawData === "object") {
+  if (typeof rawData === "object") {
     const obj = rawData as Record<string, unknown>;
 
+    // v2 wrapped shape: { messages: [...] }
     if (Array.isArray(obj.messages)) {
       return obj.messages as EvolutionMessageData[];
     }
 
+    // Single message object: has a "key" field
     if ("key" in obj) {
       return [rawData as EvolutionMessageData];
     }
   }
 
-  return rawData ? [rawData as EvolutionMessageData] : [];
+  return [];
 }

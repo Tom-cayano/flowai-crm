@@ -1,38 +1,99 @@
-import { type NextRequest, NextResponse } from "next/server";
-import { updateSession } from "@/lib/supabase/middleware";
+/**
+ * FlowAI CRM — Next.js Middleware
+ *
+ * 1. Refresh Supabase session on every request (required for SSR).
+ * 2. Protect dashboard routes — redirect to /login if no session.
+ * 3. Redirect to /dashboard if an authenticated user visits /login or /signup.
+ * 4. Bypass public APIs, webhooks, and static assets freely.
+ */
 
-// Machine-to-machine API routes that must never be redirected to /login.
-// Security for these paths is handled inside the route handler itself
-// (e.g. EVOLUTION_WEBHOOK_SECRET signature verification).
-const PUBLIC_API_PREFIXES = [
-  "/api/webhook/",
-  "/api/billing/webhooks",  // Stripe webhook — verified via signature, no session
+import { createServerClient } from "@supabase/ssr";
+import { NextResponse, type NextRequest } from "next/server";
+
+const PUBLIC_PATHS = [
+  "/login",
+  "/signup",
+  "/forgot-password",
+  "/update-password",
+  "/auth/callback",
+  "/auth/confirm",
+  "/",
+  "/pricing",
 ];
+
+const BYPASS_PREFIXES = [
+  "/api/webhook/",
+  "/api/billing/webhooks",
+  "/api/ops",
+  "/_next/",
+  "/favicon",
+  "/icon",
+];
+
+function isPublic(pathname: string): boolean {
+  if (BYPASS_PREFIXES.some((p) => pathname.startsWith(p))) return true;
+  if (PUBLIC_PATHS.includes(pathname)) return true;
+  if (/\.\w+$/.test(pathname)) return true;
+  return false;
+}
+
+function isAuthPage(pathname: string): boolean {
+  return ["/login", "/signup", "/forgot-password"].includes(pathname);
+}
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Short-circuit before touching Supabase — avoids a getUser() network call
-  // on every webhook event and eliminates the redirect-to-login behaviour.
-  if (PUBLIC_API_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
-    return NextResponse.next();
+  let supabaseResponse = NextResponse.next({ request });
+
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll();
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value }) =>
+            request.cookies.set(name, value)
+          );
+          supabaseResponse = NextResponse.next({ request });
+          cookiesToSet.forEach(({ name, value, options }) =>
+            supabaseResponse.cookies.set(name, value, options)
+          );
+        },
+      },
+    }
+  );
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (isPublic(pathname)) {
+    if (user && isAuthPage(pathname)) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/dashboard";
+      return NextResponse.redirect(url);
+    }
+    return supabaseResponse;
   }
 
-  return updateSession(request);
+  if (!user) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/login";
+    if (pathname !== "/dashboard") {
+      url.searchParams.set("redirectTo", pathname);
+    }
+    return NextResponse.redirect(url);
+  }
+
+  return supabaseResponse;
 }
 
 export const config = {
   matcher: [
-    /*
-     * Match every path EXCEPT:
-     *   - _next/static  (static assets)
-     *   - _next/image   (image optimisation)
-     *   - favicon.ico, sitemap.xml, robots.txt
-     *   - Any file with an extension (e.g. .svg, .png, .js, .css)
-     *
-     * This ensures middleware runs on all page routes (including auth routes)
-     * but not on static file requests.
-     */
-    "/((?!_next/static|_next/image|favicon\\.ico|sitemap\\.xml|robots\\.txt|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2?|ttf|otf)$).*)",
+    "/((?!_next/static|_next/image|favicon\\.ico|icon\\.svg|.*\\.(?:svg|png|jpg|jpeg|gif|webp|woff|woff2|ttf|otf|ico)$).*)",
   ],
 };

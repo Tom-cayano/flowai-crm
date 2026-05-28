@@ -44,6 +44,8 @@ export interface Message {
   failedReason?: string;
   // External reference
   externalId?: string;
+  // AI Metadata
+  isAiGenerated?: boolean;
 }
 
 export interface Conversation {

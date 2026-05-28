@@ -1,32 +1,56 @@
 "use client";
 
-import { Search, MessageSquarePlus, MessageSquare, Loader2 } from "lucide-react";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Skeleton } from "@/components/ui/skeleton";
-import { ConversationItem } from "./conversation-item";
-import { cn } from "@/lib/utils";
-import type { Conversation } from "@/types";
-import type { InboxFilter } from "@/lib/hooks/use-realtime-inbox";
+/**
+ * ConversationList — FASE 4: prop channelFilter + header contextual por canal.
+ *
+ * Cambios respecto a la versión original:
+ *   - Nueva prop opcional `channelFilter?: Channel | "all"` (default "all")
+ *   - Cuando channelFilter !== "all", el header muestra el ChannelBadge del canal
+ *     en lugar del título genérico "Conversaciones"
+ *   - Los filtros de status/mine son exactamente los mismos
+ *   - Pasa channelFilter al hook no es necesario aquí: el shell ya filtra la lista
+ *     antes de pasarla a este componente
+ */
 
-const FILTERS: { value: InboxFilter; label: string }[] = [
-  { value: "all", label: "Todas" },
-  { value: "open", label: "Abiertas" },
+import {
+  Search,
+  MessageSquarePlus,
+  MessageSquare,
+  Loader2,
+} from "lucide-react";
+import { Input }   from "@/components/ui/input";
+import { Button }  from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Skeleton }   from "@/components/ui/skeleton";
+import { ChannelBadge, type Channel } from "@/components/ui/channel-badge";
+import { ConversationItem }           from "./conversation-item";
+import { cn }                         from "@/lib/utils";
+import type { Conversation }          from "@/types";
+import type { InboxFilter }           from "@/lib/hooks/use-realtime-inbox";
+
+const STATUS_FILTERS: { value: InboxFilter; label: string }[] = [
+  { value: "all",     label: "Todas"      },
+  { value: "open",    label: "Abiertas"   },
   { value: "pending", label: "Pendientes" },
-  { value: "mine", label: "Mías" },
+  { value: "mine",    label: "Mías"       },
 ];
 
 interface ConversationListProps {
-  conversations: Conversation[];
-  activeId: string | null;
-  onSelect: (conv: Conversation) => void;
-  filter: InboxFilter;
+  conversations:  Conversation[];
+  activeId:       string | null;
+  onSelect:       (conv: Conversation) => void;
+  filter:         InboxFilter;
   onFilterChange: (f: InboxFilter) => void;
-  searchQuery: string;
+  searchQuery:    string;
   onSearchChange: (q: string) => void;
-  isLoading?: boolean;
-  isSearching?: boolean;
+  isLoading?:     boolean;
+  isSearching?:   boolean;
+  /**
+   * Cuando se pasa un canal específico (distinto de "all"), el header
+   * muestra el badge del canal en lugar del título genérico "Conversaciones".
+   * Usado por InstagramShell y MessengerShell.
+   */
+  channelFilter?: Channel | "all";
 }
 
 export function ConversationList({
@@ -37,10 +61,12 @@ export function ConversationList({
   onFilterChange,
   searchQuery,
   onSearchChange,
-  isLoading = false,
-  isSearching = false,
+  isLoading      = false,
+  isSearching    = false,
+  channelFilter  = "all",
 }: ConversationListProps) {
-  const totalUnread = conversations.reduce((n, c) => n + c.unreadCount, 0);
+  const totalUnread      = conversations.reduce((n, c) => n + c.unreadCount, 0);
+  const showChannelBadge = channelFilter !== "all";
 
   return (
     <div className="flex flex-col h-full">
@@ -48,7 +74,13 @@ export function ConversationList({
       <div className="px-4 pt-4 pb-3 space-y-3 border-b border-border shrink-0">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <h2 className="text-sm font-semibold">Conversaciones</h2>
+            {showChannelBadge ? (
+              /* Header contextual con badge del canal activo */
+              <ChannelBadge channel={channelFilter} variant="pill" size="md" />
+            ) : (
+              /* Header genérico omnicanal */
+              <h2 className="text-sm font-semibold">Conversaciones</h2>
+            )}
             {totalUnread > 0 && (
               <span className="inline-flex items-center justify-center h-4 min-w-[16px] px-1 rounded-full bg-[#10b981] text-[#030712] text-[9px] font-bold leading-none">
                 {totalUnread > 99 ? "99+" : totalUnread}
@@ -64,7 +96,7 @@ export function ConversationList({
           </Button>
         </div>
 
-        {/* Search */}
+        {/* Búsqueda */}
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
           <Input
@@ -78,14 +110,16 @@ export function ConversationList({
           )}
         </div>
 
-        {/* Filter tabs */}
+        {/* Filter tabs — idénticos al original */}
         <div className="flex gap-0 -mb-px">
-          {FILTERS.map(({ value, label }) => {
+          {STATUS_FILTERS.map(({ value, label }) => {
             const count =
               value === "all"
                 ? conversations.length
                 : conversations.filter((c) =>
-                    value === "mine" ? c.assignedTo !== undefined : c.status === value
+                    value === "mine"
+                      ? c.assignedTo !== undefined
+                      : c.status === value
                   ).length;
 
             return (
@@ -101,14 +135,10 @@ export function ConversationList({
               >
                 {label}
                 {count > 0 && (
-                  <span
-                    className={cn(
-                      "ml-0.5 text-[9px]",
-                      filter === value
-                        ? "text-[#10b981]"
-                        : "text-muted-foreground/60"
-                    )}
-                  >
+                  <span className={cn(
+                    "ml-0.5 text-[9px]",
+                    filter === value ? "text-[#10b981]" : "text-muted-foreground/60"
+                  )}>
                     {count}
                   </span>
                 )}
@@ -118,15 +148,12 @@ export function ConversationList({
         </div>
       </div>
 
-      {/* ── List ── */}
+      {/* ── Lista ── */}
       <ScrollArea className="flex-1">
         {isLoading ? (
           <div className="space-y-0">
             {Array.from({ length: 6 }).map((_, i) => (
-              <div
-                key={i}
-                className="flex items-start gap-3 px-4 py-3 border-b border-border/50"
-              >
+              <div key={i} className="flex items-start gap-3 px-4 py-3 border-b border-border/50">
                 <Skeleton className="h-10 w-10 rounded-full shrink-0" />
                 <div className="flex-1 space-y-1.5">
                   <Skeleton className="h-3 w-28" />
@@ -139,7 +166,11 @@ export function ConversationList({
         ) : conversations.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
             <div className="h-10 w-10 rounded-xl bg-muted flex items-center justify-center mb-3">
-              <MessageSquare className="h-5 w-5 text-muted-foreground" />
+              {showChannelBadge ? (
+                <ChannelBadge channel={channelFilter} variant="icon" size="lg" />
+              ) : (
+                <MessageSquare className="h-5 w-5 text-muted-foreground" />
+              )}
             </div>
             <p className="text-xs font-medium text-foreground mb-1">
               {searchQuery ? "Sin resultados" : "Sin conversaciones"}
@@ -148,7 +179,7 @@ export function ConversationList({
               {searchQuery
                 ? `No se encontraron resultados para "${searchQuery}".`
                 : filter !== "all"
-                ? `No hay conversaciones ${FILTERS.find((f) => f.value === filter)?.label.toLowerCase()}.`
+                ? `No hay conversaciones ${STATUS_FILTERS.find((f) => f.value === filter)?.label.toLowerCase()}.`
                 : "Las conversaciones aparecerán aquí cuando empieces a chatear."}
             </p>
           </div>

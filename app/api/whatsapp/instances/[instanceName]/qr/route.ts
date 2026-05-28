@@ -6,7 +6,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { evolutionClient, extractQRBase64 } from "@/lib/evolution/client";
+import { getEvolutionClient } from "@/lib/evolution-client";
 
 export async function GET(
   _request: NextRequest,
@@ -23,9 +23,10 @@ export async function GET(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // Verify ownership and check current connection state
   const { data: instance, error } = await supabase
     .from("whatsapp_instances")
-    .select("server_url, api_key, connection_state")
+    .select("id, connection_state")
     .eq("instance_name", instanceName)
     .eq("user_id", user.id)
     .single();
@@ -38,14 +39,27 @@ export async function GET(
     return NextResponse.json({ connected: true });
   }
 
-  const client = evolutionClient(instance.server_url, instance.api_key);
+  let client;
+  try {
+    client = getEvolutionClient();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[qr/route] Evolution client init error:", msg);
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+
   const result = await client.getQRCode(instanceName);
 
   if (!result.ok) {
-    return NextResponse.json({ error: result.error }, { status: 502 });
+    const errMsg =
+      typeof result.data === "object" && result.data !== null && "message" in result.data
+        ? String((result.data as { message: string }).message)
+        : `HTTP ${result.status}`;
+    return NextResponse.json({ error: errMsg }, { status: 502 });
   }
 
-  const base64 = extractQRBase64(result.data);
+  // result.data is EvolutionQRCode — extract base64 directly
+  const base64 = result.data.base64 ?? null;
   if (!base64) {
     return NextResponse.json(
       { error: "QR not ready — retry in a few seconds" },

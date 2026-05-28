@@ -10,7 +10,7 @@ export async function processSession(job: SessionJob): Promise<void> {
 
   const { data: instance } = await db
     .from("whatsapp_instances")
-    .select("server_url, api_key, connection_state")
+    .select("connection_state")
     .eq("instance_name", instanceName)
     .maybeSingle();
 
@@ -31,7 +31,7 @@ export async function processSession(job: SessionJob): Promise<void> {
         console.info(`[session-processor] "${instanceName}" already open — skip reconnect`);
         return;
       }
-      const ok = await reconnectInstance(instanceName, instance.server_url, instance.api_key);
+      const ok = await reconnectInstance(instanceName);
       if (!ok) throw new Error(`Reconnect failed for "${instanceName}"`);
       break;
     }

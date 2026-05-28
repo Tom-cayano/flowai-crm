@@ -1,14 +1,15 @@
 {
   "extends": "../tsconfig.json",
   "compilerOptions": {
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
     "target": "ES2022",
     "outDir": "../dist/workers",
     "rootDir": "..",
+    "baseUrl": "..",
     "noEmit": false,
     "paths": {
-      "@/*": ["../*"]
+      "@/*": ["./*"]
     }
   },
   "include": [

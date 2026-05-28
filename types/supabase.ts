@@ -1739,6 +1739,65 @@ export interface Database {
         Update: Record<string, never>;
         Relationships: [];
       };
+      // ─── WhatsApp Cloud API ──────────────────────────────────────────────────
+      whatsapp_cloud_accounts: {
+        Row: {
+          id:              string;
+          workspace_id:    string;
+          user_id:         string;
+          waba_id:         string;
+          phone_number_id: string;
+          phone_number:    string | null;
+          display_name:    string | null;
+          access_token:    string;
+          token_expires_at: string | null;
+          webhook_verify_token: string | null;
+          connection_state: string;
+          is_active:       boolean;
+          created_at:      string;
+          updated_at:      string;
+        };
+        Insert: {
+          id?:              string;
+          workspace_id:     string;
+          user_id:          string;
+          waba_id:          string;
+          phone_number_id:  string;
+          phone_number?:    string | null;
+          display_name?:    string | null;
+          access_token:     string;
+          token_expires_at?: string | null;
+          webhook_verify_token?: string | null;
+          connection_state?: string;
+          is_active?:       boolean;
+          created_at?:      string;
+          updated_at?:      string;
+        };
+        Update: {
+          phone_number?:    string | null;
+          display_name?:    string | null;
+          access_token?:    string;
+          token_expires_at?: string | null;
+          connection_state?: string;
+          is_active?:       boolean;
+          updated_at?:      string;
+        };
+        Relationships: [];
+      };
+      whatsapp_cloud_events: {
+        Row: {
+          wamid:       string;
+          account_id:  string;
+          received_at: string;
+        };
+        Insert: {
+          wamid:        string;
+          account_id:   string;
+          received_at?: string;
+        };
+        Update: Record<string, never>;
+        Relationships: [];
+      };
     };
 
     Views: Record<string, never>;

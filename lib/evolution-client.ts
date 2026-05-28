@@ -120,20 +120,32 @@ function makeRequest<T = unknown>(
       ? Number(parsedUrl.port)
       : isHttps ? 443 : 80;
 
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "Accept": "application/json",
+      "apikey": config.apiKey,
+      "User-Agent": USER_AGENT,
+      ...(bodyStr ? { "Content-Length": Buffer.byteLength(bodyStr).toString() } : {}),
+    };
+
     const options: https.RequestOptions = {
       hostname: parsedUrl.hostname,
       port,
       path: parsedUrl.pathname + parsedUrl.search,
       method,
       timeout: timeoutMs,
-      headers: {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "apikey": config.apiKey,
-        "User-Agent": USER_AGENT,
-        ...(bodyStr ? { "Content-Length": Buffer.byteLength(bodyStr).toString() } : {}),
-      },
+      headers,
     };
+
+    // Always log in production — visible in Vercel Function Logs
+    console.log("[EVOLUTION DEBUG]", {
+      url: parsedUrl.href,
+      method,
+      hasApiKey: !!config.apiKey,
+      apiKeyLength: config.apiKey?.length,
+      apiKeyPrefix: config.apiKey?.slice(0, 6) + "…",
+      headers: Object.keys(headers),
+    });
 
     if (debug) {
       console.log(
@@ -203,9 +215,16 @@ export class EvolutionClient {
     if (!config.serverUrl) throw new Error("[EvolutionClient] serverUrl es requerido");
     if (!config.apiKey) throw new Error("[EvolutionClient] apiKey es requerido");
 
+    // Defensive sanitization: strip whitespace and newlines that survive copy-paste or
+    // multi-line env var values (common cause of silent auth failures)
+    const cleanApiKey = config.apiKey.trim().replace(/[\r\n\t]/g, "");
+    const cleanServerUrl = config.serverUrl.trim().replace(/\/$/, "");
+
+    if (!cleanApiKey) throw new Error("[EvolutionClient] apiKey está vacía después de trim");
+
     this.config = {
-      serverUrl: config.serverUrl.replace(/\/$/, ""), // quitar trailing slash
-      apiKey: config.apiKey,
+      serverUrl: cleanServerUrl,
+      apiKey: cleanApiKey,
       timeoutMs: config.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       debug: config.debug ?? process.env.NODE_ENV === "development",
     };
@@ -316,25 +335,25 @@ export class EvolutionClient {
     instanceName: string,
     webhook: {
       url: string;
-      byEvents?: boolean;
-      base64?: boolean;
-      events?: string[];
       enabled?: boolean;
+      webhookByEvents?: boolean;
+      webhookBase64?: boolean;
+      events?: string[];
     }
   ): Promise<EvolutionResponse<unknown>> {
-    // Evolution API v2 uses webhookByEvents/webhookBase64 field names
-    const evoPayload = {
-      enabled:         webhook.enabled ?? true,
-      url:             webhook.url,
-      webhookByEvents: webhook.byEvents ?? false,
-      webhookBase64:   webhook.base64 ?? false,
-      events:          webhook.events,
-    };
     return makeRequest(
       this.config,
       "POST",
       `/webhook/set/${encodeURIComponent(instanceName)}`,
-      { webhook: evoPayload }
+      {
+        webhook: {
+          enabled: webhook.enabled ?? true,
+          url: webhook.url,
+          webhookByEvents: webhook.webhookByEvents ?? false,
+          webhookBase64: webhook.webhookBase64 ?? false,
+          events: webhook.events ?? [],
+        },
+      }
     );
   }
 
@@ -347,49 +366,54 @@ export class EvolutionClient {
   }
 }
 
-// ─── Singleton con ENV vars ───────────────────────────────────────────────────
-
-let _singleton: EvolutionClient | null = null;
+// ─── Factory desde ENV vars ───────────────────────────────────────────────────
+//
+// NO usamos singleton. En Vercel serverless una función caliente puede ejecutar
+// múltiples requests; si el env var fue actualizado en Vercel pero el singleton
+// fue creado antes del redeploy, la key vieja persiste en memoria. Leer el env
+// en cada llamada es la forma correcta — process.env ya está en RAM, no hay
+// costo de I/O.
 
 /**
  * getEvolutionClient()
  *
- * Devuelve el singleton del cliente Evolution, leyendo ENV vars automáticamente.
- * Úsalo en Server Actions y Route Handlers.
+ * Crea un EvolutionClient leyendo EVOLUTION_SERVER_URL y EVOLUTION_API_KEY
+ * del entorno. Úsalo en Server Actions y Route Handlers.
  *
  * @throws Si EVOLUTION_SERVER_URL o EVOLUTION_API_KEY no están definidas.
  */
 export function getEvolutionClient(): EvolutionClient {
-  if (_singleton) return _singleton;
-
   const serverUrl = process.env.EVOLUTION_SERVER_URL;
-  const apiKey = process.env.EVOLUTION_API_KEY;
+  const apiKey    = process.env.EVOLUTION_API_KEY;
+
+  // Log env state on every call — critical for Vercel Function Log debugging
+  console.log("[EVOLUTION DEBUG] getEvolutionClient()", {
+    hasServerUrl:    !!serverUrl,
+    serverUrlLength: serverUrl?.length,
+    hasApiKey:       !!apiKey,
+    apiKeyLength:    apiKey?.trim().length,
+    apiKeyPrefix:    apiKey ? apiKey.trim().slice(0, 6) + "…" : "MISSING",
+  });
 
   if (!serverUrl || serverUrl === "undefined" || serverUrl === "null") {
     throw new Error(
-      "[EvolutionClient] EVOLUTION_SERVER_URL no está definida en .env.local\n" +
-        "Añade: EVOLUTION_SERVER_URL=https://evolution-api-production-9497.up.railway.app"
+      "[EvolutionClient] EVOLUTION_SERVER_URL no está definida — " +
+      "añádela en Vercel → Settings → Environment Variables"
     );
   }
 
   if (!apiKey || apiKey === "undefined" || apiKey === "null") {
     throw new Error(
-      "[EvolutionClient] EVOLUTION_API_KEY no está definida en .env.local\n" +
-        "Añade: EVOLUTION_API_KEY=flowai2026secure"
+      "[EvolutionClient] EVOLUTION_API_KEY no está definida — " +
+      "añádela en Vercel → Settings → Environment Variables"
     );
   }
 
-  _singleton = new EvolutionClient({
+  return new EvolutionClient({
     serverUrl,
     apiKey,
     debug: process.env.NODE_ENV === "development",
   });
-
-  console.log(
-    `[EvolutionClient] Singleton inicializado → ${serverUrl.replace(/\/$/, "")}`
-  );
-
-  return _singleton;
 }
 
 /**

@@ -82,7 +82,18 @@ export async function createInstance(payload: {
 
   const instanceName = makeInstanceName(user.id, label);
 
-  // 1. Get singleton client (reads EVOLUTION_SERVER_URL + EVOLUTION_API_KEY from ENV)
+  // 1. Build Evolution client (reads EVOLUTION_SERVER_URL + EVOLUTION_API_KEY from ENV)
+  const rawApiKey    = process.env.EVOLUTION_API_KEY ?? "";
+  const rawServerUrl = process.env.EVOLUTION_SERVER_URL ?? "";
+
+  console.log("[EVOLUTION DEBUG] createInstance action", {
+    instanceName,
+    url: `${rawServerUrl}/instance/create`,
+    hasApiKey:    !!rawApiKey,
+    apiKeyLength: rawApiKey.trim().length,
+    headers: { apikey: rawApiKey ? rawApiKey.trim().slice(0, 6) + "…" : "MISSING" },
+  });
+
   let evoClient;
   try {
     evoClient = getEvolutionClient();
@@ -97,6 +108,12 @@ export async function createInstance(payload: {
     integration: "WHATSAPP-BAILEYS",
   });
 
+  console.log("[EVOLUTION DEBUG] createInstance result", {
+    ok: evoResult.ok,
+    status: evoResult.status,
+    data: JSON.stringify(evoResult.data).slice(0, 300),
+  });
+
   if (!evoResult.ok) {
     return {
       data: null,
@@ -109,8 +126,8 @@ export async function createInstance(payload: {
   await evoClient
     .setWebhook(instanceName, {
       url: webhookUrl,
-      byEvents: false,
-      base64: false,
+      webhookByEvents: false,
+      webhookBase64: false,
       events: [
         "MESSAGES_UPSERT",
         "MESSAGES_UPDATE",
@@ -124,8 +141,7 @@ export async function createInstance(payload: {
       console.warn("[whatsapp-instances] setWebhook failed (non-blocking):", err)
     );
 
-  // 4. Persist the instance in Supabase
-  // server_url and api_key come from ENV, not user input — store canonical values
+  // 4. Persist the instance in Supabase — store canonical ENV values, not user input
   const serverUrl = process.env.EVOLUTION_SERVER_URL ?? "";
   const apiKey = process.env.EVOLUTION_API_KEY ?? "";
 

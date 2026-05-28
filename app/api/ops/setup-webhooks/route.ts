@@ -1,11 +1,6 @@
 // GET /api/ops/setup-webhooks
 //
-// One-shot endpoint that:
-// 1. Fetches all Evolution API instances
-// 2. Checks their current webhook configuration
-// 3. Updates any instance whose webhook URL doesn't match the CRM webhook
-//
-// This endpoint is safe to call multiple times (idempotent).
+// Idempotent — fetches all Evolution API instances and sets webhooks to CRM URL.
 
 import { NextResponse } from "next/server";
 
@@ -37,18 +32,6 @@ const WEBHOOK_EVENTS = [
   "NEW_JWT_TOKEN",
 ];
 
-interface EvolutionInstance {
-  instanceName: string;
-  instanceId?: string;
-  status?: string;
-  webhookWaBusiness?: string | null;
-  webhook?: {
-    url?: string;
-    enabled?: boolean;
-    events?: string[];
-  };
-}
-
 export async function GET() {
   const serverUrl = (process.env.EVOLUTION_SERVER_URL ?? "").replace(/\/$/, "");
   const apiKey    = (process.env.EVOLUTION_API_KEY ?? "").trim();
@@ -57,38 +40,54 @@ export async function GET() {
     return NextResponse.json({ error: "EVOLUTION_SERVER_URL or EVOLUTION_API_KEY not set" }, { status: 500 });
   }
 
-  const headers = {
+  const headers: Record<string, string> = {
     "apikey": apiKey,
     "Content-Type": "application/json",
     "Accept": "application/json",
   };
 
   // 1. Fetch all instances
-  let instances: EvolutionInstance[] = [];
+  let rawInstances: unknown[] = [];
   try {
     const res = await fetch(`${serverUrl}/instance/fetchInstances`, {
       headers,
       signal: AbortSignal.timeout(15_000),
     });
     const data = await res.json() as unknown;
-    instances = Array.isArray(data) ? data as EvolutionInstance[] : [];
+    rawInstances = Array.isArray(data) ? data : [];
   } catch (err) {
     return NextResponse.json({ error: "Failed to fetch instances", detail: String(err) }, { status: 502 });
+  }
+
+  // Evolution API v2 wraps instances: [{instance: {instanceName, ...}, ...}]
+  // Evolution API v1 returns: [{instanceName, ...}]
+  function extractName(item: unknown): string | null {
+    if (typeof item !== "object" || !item) return null;
+    const obj = item as Record<string, unknown>;
+    // v2 shape
+    if (obj.instance && typeof obj.instance === "object") {
+      const inst = obj.instance as Record<string, unknown>;
+      return typeof inst.instanceName === "string" ? inst.instanceName : null;
+    }
+    // v1 shape
+    return typeof obj.instanceName === "string" ? obj.instanceName : null;
   }
 
   const results: Array<{
     instance: string;
     previousWebhook: string | null;
-    action: "updated" | "already_correct" | "error";
+    action: "updated" | "already_correct" | "skipped" | "error";
     error?: string;
   }> = [];
 
-  // 2. For each instance, fetch webhook config and update if needed
-  for (const inst of instances) {
-    const name = inst.instanceName;
-    if (!name || name === "__auth_probe__") continue;
+  // 2. For each instance, check and update webhook
+  for (const item of rawInstances) {
+    const name = extractName(item);
+    if (!name || name === "__auth_probe__") {
+      continue;
+    }
 
-    // Fetch current webhook
+    // Fetch current webhook config
     let currentUrl: string | null = null;
     try {
       const res = await fetch(`${serverUrl}/webhook/find/${encodeURIComponent(name)}`, {
@@ -96,11 +95,12 @@ export async function GET() {
         signal: AbortSignal.timeout(8_000),
       });
       if (res.ok) {
-        const data = await res.json() as { webhook?: { url?: string } };
-        currentUrl = data?.webhook?.url ?? null;
+        const data = await res.json() as Record<string, unknown>;
+        const wh = data?.webhook as Record<string, unknown> | undefined;
+        currentUrl = (wh?.url as string) ?? null;
       }
     } catch {
-      // ignore — will just update
+      // ignore — will update anyway
     }
 
     if (currentUrl === WEBHOOK_URL) {
@@ -127,23 +127,22 @@ export async function GET() {
         results.push({ instance: name, previousWebhook: currentUrl, action: "updated" });
       } else {
         const text = await res.text();
-        results.push({ instance: name, previousWebhook: currentUrl, action: "error", error: text.slice(0, 200) });
+        results.push({ instance: name, previousWebhook: currentUrl, action: "error", error: text.slice(0, 300) });
       }
     } catch (err) {
       results.push({ instance: name, previousWebhook: currentUrl, action: "error", error: String(err) });
     }
   }
 
-  const updated = results.filter((r) => r.action === "updated").length;
-  const alreadyCorrect = results.filter((r) => r.action === "already_correct").length;
-  const errors = results.filter((r) => r.action === "error").length;
-
   return NextResponse.json({
     webhookUrl: WEBHOOK_URL,
-    instanceCount: instances.length,
-    updated,
-    alreadyCorrect,
-    errors,
+    instanceCount: rawInstances.length,
+    processed: results.length,
+    updated: results.filter((r) => r.action === "updated").length,
+    alreadyCorrect: results.filter((r) => r.action === "already_correct").length,
+    errors: results.filter((r) => r.action === "error").length,
     results,
+    // Debug: show raw structure of first instance
+    rawSample: rawInstances[0] ?? null,
   });
 }

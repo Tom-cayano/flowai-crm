@@ -99,7 +99,7 @@ export async function GET() {
           webhook_set:      true,
           updated_at:       new Date().toISOString(),
         },
-        { onConflict: "user_id,instance_name", ignoreDuplicates: false }
+        { onConflict: 'instance_name' }
       );
 
     if (error) {

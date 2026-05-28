@@ -26,11 +26,9 @@ function AddInstanceForm({ onCreated, onCancel }: AddFormProps) {
     setError(null);
     const fd = new FormData(e.currentTarget);
     const label = (fd.get("label") as string).trim();
-    const serverUrl = (fd.get("serverUrl") as string).trim();
-    const apiKey = (fd.get("apiKey") as string).trim();
 
     startTransition(async () => {
-      const result = await createInstance({ label, serverUrl, apiKey });
+      const result = await createInstance({ label });
       if (result.error) {
         setError(result.error);
         return;
@@ -66,32 +64,6 @@ function AddInstanceForm({ onCreated, onCancel }: AddFormProps) {
             required
             disabled={isPending}
             className="h-8 text-sm"
-          />
-        </div>
-
-        <div className="space-y-1.5">
-          <Label htmlFor="serverUrl" className="text-xs">URL del servidor Evolution</Label>
-          <Input
-            id="serverUrl"
-            name="serverUrl"
-            type="url"
-            placeholder="https://api.tuservidor.com"
-            required
-            disabled={isPending}
-            className="h-8 text-sm font-mono"
-          />
-        </div>
-
-        <div className="space-y-1.5">
-          <Label htmlFor="apiKey" className="text-xs">API Key</Label>
-          <Input
-            id="apiKey"
-            name="apiKey"
-            type="password"
-            placeholder="••••••••••••••••"
-            required
-            disabled={isPending}
-            className="h-8 text-sm font-mono"
           />
         </div>
 

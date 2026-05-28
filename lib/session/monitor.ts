@@ -2,7 +2,7 @@
 // instances and repairs discrepancies in the Supabase DB.
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { evolutionClient } from "@/lib/evolution/client";
+import { getEvolutionClient } from "@/lib/evolution-client";
 import { enqueueSession } from "@/lib/queue/producers";
 
 export interface SessionHealthReport {
@@ -19,7 +19,7 @@ export async function runSessionHealthCheck(): Promise<SessionHealthReport[]> {
 
   const { data: instances, error } = await supabase
     .from("whatsapp_instances")
-    .select("id, instance_name, user_id, server_url, api_key, connection_state, is_active")
+    .select("id, instance_name, user_id, connection_state, is_active")
     .eq("is_active", true);
 
   if (error || !instances?.length) {
@@ -27,20 +27,28 @@ export async function runSessionHealthCheck(): Promise<SessionHealthReport[]> {
     return reports;
   }
 
+  // Get singleton client — reads EVOLUTION_SERVER_URL + EVOLUTION_API_KEY from ENV
+  let client;
+  try {
+    client = getEvolutionClient();
+  } catch (err) {
+    console.error("[session-monitor] Evolution client unavailable:", err);
+    return reports;
+  }
+
   await Promise.allSettled(
     instances.map(async (instance) => {
-      const client = evolutionClient(instance.server_url, instance.api_key);
       const result = await client.getConnectionState(instance.instance_name);
 
       if (!result.ok) {
         console.warn(
           `[session-monitor] Could not reach Evolution for "${instance.instance_name}":`,
-          result.error
+          result.status
         );
         return;
       }
 
-      const actualState   = result.data.instance.state;
+      const actualState   = result.data.instance.state as "open" | "close" | "connecting";
       const expectedState = instance.connection_state;
       const mismatch      = actualState !== expectedState;
 
@@ -86,15 +94,21 @@ export async function runSessionHealthCheck(): Promise<SessionHealthReport[]> {
 }
 
 export async function reconnectInstance(
-  instanceName: string,
-  serverUrl: string,
-  apiKey: string
+  instanceName: string
 ): Promise<boolean> {
-  const client = evolutionClient(serverUrl, apiKey);
-  const result = await client.restart(instanceName);
+  let client;
+  try {
+    client = getEvolutionClient();
+  } catch (err) {
+    console.error(`[session-monitor] Evolution client unavailable for reconnect "${instanceName}":`, err);
+    return false;
+  }
+
+  // New client uses restartInstance (not restart)
+  const result = await client.restartInstance(instanceName);
 
   if (!result.ok) {
-    console.error(`[session-monitor] Reconnect failed for "${instanceName}":`, result.error);
+    console.error(`[session-monitor] Reconnect failed for "${instanceName}":`, result.status);
     return false;
   }
 

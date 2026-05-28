@@ -59,17 +59,20 @@ export async function GET() {
     return NextResponse.json({ error: "Failed to fetch instances", detail: String(err) }, { status: 502 });
   }
 
-  // Evolution API v2 wraps instances: [{instance: {instanceName, ...}, ...}]
-  // Evolution API v1 returns: [{instanceName, ...}]
+  // Evolution API v2.3.7 returns flat objects with field "name" (not "instanceName")
+  // Older v1 returned {instanceName: ...} or {instance: {instanceName: ...}}
   function extractName(item: unknown): string | null {
     if (typeof item !== "object" || !item) return null;
     const obj = item as Record<string, unknown>;
-    // v2 shape
+    // v2.3.7 flat shape: {name: "...", id: "...", connectionStatus: ...}
+    if (typeof obj.name === "string") return obj.name;
+    // v2 nested: {instance: {instanceName: ...}}
     if (obj.instance && typeof obj.instance === "object") {
       const inst = obj.instance as Record<string, unknown>;
-      return typeof inst.instanceName === "string" ? inst.instanceName : null;
+      if (typeof inst.instanceName === "string") return inst.instanceName;
+      if (typeof inst.name === "string") return inst.name;
     }
-    // v1 shape
+    // v1 flat: {instanceName: ...}
     return typeof obj.instanceName === "string" ? obj.instanceName : null;
   }
 

@@ -32,10 +32,15 @@ export function createAdminClient() {
 
   return createClient<Database>(url, serviceRoleKey, {
     auth: {
-      // Do not persist sessions in the admin client —
-      // it should always use the service role, not a user session.
       autoRefreshToken: false,
       persistSession: false,
+    },
+    realtime: {
+      // Node.js 20 doesn't have native WebSocket — use the ws package.
+      // Node.js 22+ has native WebSocket and doesn't need this.
+      ...(typeof globalThis.WebSocket === "undefined"
+        ? { transport: require("ws") }
+        : {}),
     },
   });
 }

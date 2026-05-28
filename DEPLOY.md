@@ -83,3 +83,4 @@ curl "https://tu-dominio.com/api/ops/health"
 # Test auth callback (debe redirigir a /login?error=missing_code)
 curl -I "https://tu-dominio.com/auth/callback"
 ```
+# Last deploy: Thu May 28 23:52:32 CEST 2026

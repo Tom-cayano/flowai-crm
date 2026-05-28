@@ -49,7 +49,7 @@ function isAuthPage(pathname: string): boolean {
   return ["/login", "/signup", "/forgot-password"].includes(pathname);
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Crear respuesta base que pasará las cookies actualizadas

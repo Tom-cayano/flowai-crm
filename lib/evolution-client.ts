@@ -319,13 +319,22 @@ export class EvolutionClient {
       byEvents?: boolean;
       base64?: boolean;
       events?: string[];
+      enabled?: boolean;
     }
   ): Promise<EvolutionResponse<unknown>> {
+    // Evolution API v2 uses webhookByEvents/webhookBase64 field names
+    const evoPayload = {
+      enabled:         webhook.enabled ?? true,
+      url:             webhook.url,
+      webhookByEvents: webhook.byEvents ?? false,
+      webhookBase64:   webhook.base64 ?? false,
+      events:          webhook.events,
+    };
     return makeRequest(
       this.config,
       "POST",
       `/webhook/set/${encodeURIComponent(instanceName)}`,
-      { webhook }
+      { webhook: evoPayload }
     );
   }
 

@@ -153,7 +153,11 @@ export async function POST(request: NextRequest) {
           statusReason: connData?.statusReason ?? null,
         });
 
-        if (connData?.state) {
+        // Deduplicate: only enqueue state transitions that are meaningful.
+        // Ignoring "connecting" prevents Redis spam from Baileys reconnect loops
+        // (each reconnect cycle fires: connecting → open → close → connecting → …)
+        const MEANINGFUL_STATES = new Set(["open", "close"]);
+        if (connData?.state && MEANINGFUL_STATES.has(connData.state)) {
           await enqueueConnection({
             instanceName: instance,
             state:        connData.state,

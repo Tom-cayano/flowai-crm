@@ -76,12 +76,14 @@ async function getQueueStats(name: string, q: QueueLike): Promise<QueueSnapshot>
   const hour   = Math.floor(Date.now() / 3_600_000);
   const counts = await q.getJobCounts("waiting", "active", "completed", "failed", "delayed");
 
-  const [tp, latencies] = await Promise.all([
-    redis.get(throughputKey(name, hour)),
-    redis.lrange(latencyKey(name), 0, -1),
-  ]);
+  // Use pipeline to batch Redis reads into a single round-trip (2 commands → 1 pipeline)
+  const pipeline = redis.pipeline();
+  pipeline.get(throughputKey(name, hour));
+  pipeline.lrange(latencyKey(name), 0, 99); // cap at 100 samples to reduce transfer
+  const [[, tp], [, latencies]] = await pipeline.exec() as [[null, string | null], [null, string[]]];
+  const _latencies = latencies ?? [];
 
-  const latNums     = latencies.map(Number).filter((n) => !isNaN(n));
+  const latNums     = _latencies.map(Number).filter((n) => !isNaN(n));
   const avgLatency  = latNums.length > 0
     ? Math.round(latNums.reduce((a, b) => a + b, 0) / latNums.length)
     : null;

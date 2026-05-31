@@ -174,7 +174,34 @@ function extractUserId(data: unknown): string | undefined {
 
 // ─── Bootstrap ────────────────────────────────────────────────────────────────
 
+function validateSupabaseKey(): void {
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+  if (!key) {
+    log.error("SUPABASE_SERVICE_ROLE_KEY is missing — all DB writes will fail");
+    return;
+  }
+  try {
+    const payload = JSON.parse(Buffer.from(key.split(".")[1] ?? "", "base64url").toString());
+    if (payload.role !== "service_role") {
+      log.error(
+        "SUPABASE_SERVICE_ROLE_KEY has wrong role — ALL DB WRITES WILL FAIL DUE TO RLS",
+        {
+          jwtRole: payload.role,
+          fix: "Go to https://supabase.com/dashboard/project/bnigdnsfdvvumlfrfwnf/settings/api " +
+               "and copy the 'service_role' key (not the anon key) into this env var",
+        }
+      );
+    } else {
+      log.info("SUPABASE_SERVICE_ROLE_KEY validated", { role: payload.role });
+    }
+  } catch {
+    log.warn("SUPABASE_SERVICE_ROLE_KEY could not be decoded as JWT");
+  }
+}
+
 async function start(): Promise<void> {
+  validateSupabaseKey();
+
   log.info("starting FlowAI engine", {
     workerId: WORKER_ID,
     version:  WORKER_VERSION,

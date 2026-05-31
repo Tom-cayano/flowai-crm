@@ -55,6 +55,7 @@ export async function evolutionSendText(
         text: payload.text,
         delay: payload.delayMs ?? 1200,
       }),
+      signal: AbortSignal.timeout(10_000),
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

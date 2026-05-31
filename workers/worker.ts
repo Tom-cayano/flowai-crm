@@ -199,8 +199,35 @@ function validateSupabaseKey(): void {
   }
 }
 
+async function validateEvolutionApi(): Promise<void> {
+  const serverUrl = process.env.EVOLUTION_SERVER_URL ?? "";
+  const apiKey    = process.env.EVOLUTION_API_KEY    ?? "";
+
+  if (!serverUrl || !apiKey) {
+    log.error("EVOLUTION_SERVER_URL or EVOLUTION_API_KEY missing — outbound sends will fail if whatsapp_instances has no server_url/api_key");
+    return;
+  }
+
+  try {
+    const url = `${serverUrl.replace(/\/$/, "")}/instance/fetchInstances`;
+    const res = await fetch(url, {
+      headers: { apikey: apiKey },
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (res.ok) {
+      const data = await res.json().catch(() => ({})) as { instance?: unknown }[];
+      log.info("Evolution API reachable", { url, instanceCount: Array.isArray(data) ? data.length : "?" });
+    } else {
+      log.warn("Evolution API returned non-OK at startup", { url, status: res.status });
+    }
+  } catch (err) {
+    log.warn("Evolution API unreachable at startup", { error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
 async function start(): Promise<void> {
   validateSupabaseKey();
+  await validateEvolutionApi();
 
   log.info("starting FlowAI engine", {
     workerId: WORKER_ID,

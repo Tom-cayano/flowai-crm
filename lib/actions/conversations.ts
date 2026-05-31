@@ -286,21 +286,60 @@ export async function sendMessage(
       }
       console.info("[sendMessage] enqueueing outbound", { instanceName: inst.instance_name, serverUrl: inst.server_url, phone: conv.contact_phone });
 
-      await enqueueOutbound({
+      const jobPayload = {
         instanceName: inst.instance_name,
         serverUrl:    inst.server_url,
         apiKey:       inst.api_key,
         phone:        conv.contact_phone,
         content:      trimmed,
-        type:         "text",
+        type:         "text" as const,
         conversationId,
         userId:       user.id,
-        origin:       "manual",
+        origin:       "manual" as const,
         agentName:    agentName ?? undefined,
         messageId:    msg.id,
-      });
+      };
+
+      // Try BullMQ queue (3 s timeout); fall back to direct Evolution call if Redis is unreachable
+      let queued = false;
+      try {
+        await Promise.race([
+          enqueueOutbound(jobPayload),
+          new Promise<never>((_, rej) =>
+            setTimeout(() => rej(new Error("queue-timeout")), 3_000)
+          ),
+        ]);
+        queued = true;
+        console.info("[sendMessage] job queued", { instanceName: inst.instance_name });
+      } catch (queueErr) {
+        console.warn("[sendMessage] queue unavailable — direct Evolution fallback",
+          { reason: queueErr instanceof Error ? queueErr.message : String(queueErr) });
+      }
+
+      if (!queued) {
+        const { evolutionSendText } = await import("@/lib/webhook/evolution-client");
+        const result = await evolutionSendText(
+          inst.instance_name,
+          inst.server_url,
+          inst.api_key,
+          { phone: conv.contact_phone, text: trimmed, delayMs: 1200 },
+        );
+        if (result.ok) {
+          console.info("[sendMessage] direct send OK", { externalId: result.externalId });
+          if (result.externalId) {
+            await admin.from("messages").update({ external_id: result.externalId }).eq("id", msg.id);
+          }
+        } else {
+          console.error("[sendMessage] direct send FAILED", {
+            error:        result.error,
+            url:          `${inst.server_url}/message/sendText/${inst.instance_name}`,
+            instanceName: inst.instance_name,
+            phone:        conv.contact_phone,
+          });
+        }
+      }
     } catch (err) {
-      console.error("[sendMessage] outbound enqueue failed:", err);
+      console.error("[sendMessage] outbound error:", err);
     }
   })();
 

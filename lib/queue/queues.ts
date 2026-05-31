@@ -3,7 +3,7 @@
 // instances are for job creation only and are safe to import in Next.js.
 
 import { Queue } from "bullmq";
-import { getRedis } from "@/lib/redis/client";
+import { getProducerRedis } from "@/lib/redis/client";
 import { QUEUE_NAMES } from "./types";
 import type {
   MessageJob,
@@ -68,7 +68,7 @@ let wacMessageQueue:  Queue<WACMessageJob>  | null = null;
 let wacOutboundQueue: Queue<WACOutboundJob> | null = null;
 
 function conn() {
-  return { connection: getRedis() };
+  return { connection: getProducerRedis() };
 }
 
 export function getMessageQueue():    Queue<MessageJob>    { return (messageQueue    ??= new Queue(QUEUE_NAMES.WPP_MESSAGE,    conn())); }

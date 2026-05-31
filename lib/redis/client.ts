@@ -42,7 +42,10 @@ export function getProducerRedis(): Redis {
     enableReadyCheck: false,
     lazyConnect: true,
     connectTimeout: 3_000,          // Give up connecting after 3 s
-    retryStrategy: () => null,      // Don't retry reconnects in the producer
+    // Allow up to 3 reconnect attempts (max ~1 s total) so transient Upstash
+    // idle-timeouts don't permanently kill the singleton in warm Vercel instances.
+    // After 3 failures the client gives up and the next enqueue throws fast.
+    retryStrategy: (times) => (times > 3 ? null : Math.min(times * 200, 500)),
   });
 
   _producerRedis.on("error", (err: Error) => console.error("[redis/producer] error:", err.message));

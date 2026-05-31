@@ -344,7 +344,7 @@ async function upsertWhatsAppChat(
 
   const { data: existing } = await db
     .from("whatsapp_chats")
-    .select("id")
+    .select("id, unread_count")
     .eq("instance_id", config.instanceId)
     .eq("remote_jid", remoteJid)
     .maybeSingle();
@@ -356,7 +356,7 @@ async function upsertWhatsAppChat(
         last_message_at:      lastAt,
         last_message_preview: lastPreview.slice(0, 120),
         last_message_sender:  "them",
-        unread_count:         db.rpc("increment_unread", { p_id: existing.id }) as unknown as number,
+        unread_count:         (existing.unread_count ?? 0) + 1,
         updated_at:           new Date().toISOString(),
       })
       .eq("id", existing.id);
@@ -572,9 +572,12 @@ async function storeCrmMessage(
       external_id:     externalId,
     });
 
-  if (error && !error.message.includes("duplicate")) {
-    console.error("[msg-processor] messages insert error:", error.message);
-    return;
+  if (error) {
+    if (!error.message.includes("duplicate")) {
+      console.error("[msg-processor] messages insert error:", error.message);
+    }
+    // Don't return — always update conversation preview so the inbox stays in
+    // sync even when the message row itself fails (e.g. transient DB error).
   }
 
   const now = new Date().toISOString();

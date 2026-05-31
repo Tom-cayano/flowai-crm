@@ -46,7 +46,8 @@ export async function GET(req: NextRequest) {
 
   // ── Step 1: Supabase query with 5 s timeout ───────────────────────────────
   console.log("[test-outbound] querying whatsapp_instances userId=", userId);
-  let dbResult: { data: unknown; error: unknown } | { timedOut: true } | null = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let dbResult: any = null;
   let dbCrash: string | null = null;
 
   try {
@@ -57,7 +58,7 @@ export async function GET(req: NextRequest) {
         .select("id, instance_name, server_url, api_key, connection_state, is_active, created_at")
         .eq("user_id", userId)
         .order("created_at", { ascending: false })
-    ) as typeof dbResult;
+    );
   } catch (e) {
     dbCrash = e instanceof Error ? e.message : String(e);
   }

@@ -91,7 +91,11 @@ export function useInfiniteMessages(
           );
         }
       )
-      .subscribe();
+      .subscribe((status, err) => {
+        if (status === "CHANNEL_ERROR") {
+          console.error("[realtime] messages subscription error:", err?.message);
+        }
+      });
 
     return () => {
       supabase.removeChannel(channel);

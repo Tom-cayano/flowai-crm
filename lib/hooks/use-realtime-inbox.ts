@@ -81,8 +81,10 @@ export function useRealtimeInbox({
   }, [searchQuery]);
 
   // ── Realtime: conversations UPDATE (last_message, status, unread_count) ──
-  // La suscripción es canal-agnóstica: filtra solo por user_id.
-  // El filtro de canal se aplica en cliente para no duplicar canales de Supabase.
+  // No server-side filter: relying on RLS (auth.uid() = user_id) alone.
+  // Filtered postgres_changes on non-PK UUID columns silently drop events in
+  // some Supabase Realtime versions — removing the filter is the safe path.
+  // Client-side guard below ensures only this user's rows are processed.
   useEffect(() => {
     const supabase = createClient();
 
@@ -94,15 +96,23 @@ export function useRealtimeInbox({
           event:  "UPDATE",
           schema: "public",
           table:  "conversations",
-          filter: `user_id=eq.${userId}`,
         },
         (payload) => {
-          const updated = mapRealtimeConversation(
-            payload.new as Record<string, unknown>
-          );
+          const raw = payload.new as Record<string, unknown>;
+          // Client-side guard — RLS should prevent foreign rows, but be explicit.
+          if (raw.user_id !== userId) return;
+
+          const updated = mapRealtimeConversation(raw);
           setConversations((prev) => {
-            const next = prev.map((c) => (c.id === updated.id ? updated : c));
-            return [...next].sort(
+            const idx = prev.findIndex((c) => c.id === updated.id);
+            if (idx === -1) {
+              // Conversation not in local state (race on INSERT) — refetch.
+              void refresh();
+              return prev;
+            }
+            const next = [...prev];
+            next[idx] = updated;
+            return next.sort(
               (a, b) =>
                 new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
             );
@@ -115,14 +125,19 @@ export function useRealtimeInbox({
           event:  "INSERT",
           schema: "public",
           table:  "conversations",
-          filter: `user_id=eq.${userId}`,
         },
-        async () => {
-          // Refetch on insert — nuevas conversaciones necesitan la forma denormalizada completa
-          await refresh();
+        (payload) => {
+          const raw = payload.new as Record<string, unknown>;
+          if (raw.user_id !== userId) return;
+          // Refetch on insert — new conversations need the fully denormalized shape.
+          void refresh();
         }
       )
-      .subscribe();
+      .subscribe((status, err) => {
+        if (status === "CHANNEL_ERROR") {
+          console.error("[realtime] inbox subscription error:", err?.message);
+        }
+      });
 
     return () => {
       supabase.removeChannel(channel);

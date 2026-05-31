@@ -12,9 +12,9 @@ export const maxDuration = 30;
 
 const OWNER_UUID = "2da9c9b6-2efe-4137-a94a-dea999cb404d";
 
-function withTimeout<T>(ms: number, p: Promise<T>): Promise<T | { timedOut: true }> {
+function withTimeout<T>(ms: number, p: PromiseLike<T>): Promise<T | { timedOut: true }> {
   return Promise.race([
-    p,
+    Promise.resolve(p),
     new Promise<{ timedOut: true }>(r => setTimeout(() => r({ timedOut: true }), ms)),
   ]);
 }

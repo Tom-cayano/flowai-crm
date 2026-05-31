@@ -91,32 +91,41 @@ export async function GET() {
   const instances = (await res.json()) as EvolutionInstance[];
   console.log(`[sync-instances] Found ${instances.length} Evolution instance(s):`, instances.map((i) => i.name));
 
-  // 2. Load all users and build resolution helpers
+  // 2. Load all users via the profiles table (avoids auth.admin.listUsers() which
+  //    requires a special Supabase permission not always available on all plans).
   const db = createAdminClient();
-  const { data: { users }, error: usersError } = await db.auth.admin.listUsers();
-  if (usersError) {
-    return NextResponse.json({ error: "Failed to list users", detail: usersError.message }, { status: 500 });
+
+  const { data: profiles, error: profilesError } = await db
+    .from("profiles")
+    .select("id, email, created_at")
+    .order("created_at", { ascending: true });
+
+  if (profilesError) {
+    return NextResponse.json({ error: "Failed to list profiles", detail: profilesError.message }, { status: 500 });
   }
 
-  const allUsers = users ?? [];
+  const allProfiles = profiles ?? [];
 
   // Map: 8-char UUID prefix (no dashes) → full user_id
   const prefixToUser = new Map<string, string>();
-  for (const user of allUsers) {
-    const prefix = user.id.split("-")[0];
-    if (prefix) prefixToUser.set(prefix, user.id);
+  for (const p of allProfiles) {
+    const prefix = p.id.split("-")[0];
+    if (prefix) prefixToUser.set(prefix, p.id);
   }
 
   // Tier 2: explicit fallback from env
   const fallbackUserId = process.env.EVOLUTION_FALLBACK_USER_ID?.trim() || null;
 
-  // Tier 3: oldest user = workspace owner
-  const sortedByCreation = [...allUsers].sort(
-    (a, b) => new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime()
-  );
-  const workspaceOwnerId = sortedByCreation[0]?.id ?? null;
+  // Tier 3: workspace owner from the workspaces table
+  const { data: firstWorkspace } = await db
+    .from("workspaces")
+    .select("owner_id")
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  const workspaceOwnerId = firstWorkspace?.owner_id ?? allProfiles[0]?.id ?? null;
 
-  console.log(`[sync-instances] Users loaded: ${allUsers.length}, fallbackUserId: ${fallbackUserId ?? "not set"}, workspaceOwner: ${workspaceOwnerId ?? "none"}`);
+  console.log(`[sync-instances] Profiles loaded: ${allProfiles.length}, fallbackUserId: ${fallbackUserId ?? "not set"}, workspaceOwner: ${workspaceOwnerId ?? "none"} (${allProfiles.find((p) => p.id === workspaceOwnerId)?.email ?? "unknown email"})`);
 
   const results: Array<{
     instance: string;

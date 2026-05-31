@@ -112,7 +112,7 @@ export async function processMessage(
 
   // ── CRM layer ─────────────────────────────────────────────────────────────
   const crmContactId = await upsertCrmContact(supabase, config.userId, phone, contactName);
-  const crmConv      = await upsertCrmConversation(supabase, config.userId, crmContactId, contactName, phone);
+  const crmConv      = await upsertCrmConversation(supabase, config.userId, crmContactId, contactName, phone, config.instanceId || null);
 
   if (!crmConv) {
     console.error("[msg-processor] Failed to upsert CRM conversation — dropping");
@@ -472,11 +472,12 @@ async function upsertCrmConversation(
   userId: string,
   contactId: string | null,
   contactName: string,
-  contactPhone: string
+  contactPhone: string,
+  instanceId: string | null
 ): Promise<{ id: string; isNew: boolean } | null> {
   const { data: existing } = await db
     .from("conversations")
-    .select("id, contact_name")
+    .select("id, contact_name, instance_id")
     .eq("user_id", userId)
     .eq("status", "open")
     .eq("channel", "whatsapp")
@@ -486,13 +487,14 @@ async function upsertCrmConversation(
     .maybeSingle();
 
   if (existing) {
-    const hasRealName  = contactName && contactName !== contactPhone;
-    const isPlaceholder = !existing.contact_name || existing.contact_name === contactPhone;
-    if (hasRealName && isPlaceholder) {
-      await db
-        .from("conversations")
-        .update({ contact_name: contactName })
-        .eq("id", existing.id);
+    const updates: Record<string, unknown> = {};
+    const hasRealName    = contactName && contactName !== contactPhone;
+    const isPlaceholder  = !existing.contact_name || existing.contact_name === contactPhone;
+    if (hasRealName && isPlaceholder) updates.contact_name = contactName;
+    // Back-fill instance_id on conversations that were created before this fix
+    if (instanceId && !existing.instance_id) updates.instance_id = instanceId;
+    if (Object.keys(updates).length > 0) {
+      await db.from("conversations").update(updates).eq("id", existing.id);
     }
     return { id: existing.id, isNew: false };
   }
@@ -508,6 +510,7 @@ async function upsertCrmConversation(
       channel:       "whatsapp" as const,
       tags:          [] as string[],
       unread_count:  0,
+      instance_id:   instanceId,
     })
     .select("id")
     .single();

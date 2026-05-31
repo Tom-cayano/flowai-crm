@@ -241,12 +241,27 @@ export async function sendMessage(
       }
 
       // ── WhatsApp (default) ────────────────────────────────────────────────
-      if (!conv.instance_id) return;
+      // Resolve the instance: prefer instance_id stored on the conversation,
+      // fall back to the user's first connected instance for conversations
+      // created before instance_id was stored (back-compat).
+      let instanceRowId = conv.instance_id;
+      if (!instanceRowId) {
+        const { data: fallback } = await admin
+          .from("whatsapp_instances")
+          .select("id")
+          .eq("user_id", user.id)
+          .eq("connection_state", "open")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        instanceRowId = fallback?.id ?? null;
+      }
+      if (!instanceRowId) return;
 
       const { data: inst } = await admin
         .from("whatsapp_instances")
         .select("instance_name, server_url, api_key")
-        .eq("id", conv.instance_id)
+        .eq("id", instanceRowId)
         .single();
 
       if (!inst?.instance_name || !inst.server_url || !inst.api_key) return;

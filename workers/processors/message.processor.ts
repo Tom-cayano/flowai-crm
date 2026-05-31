@@ -62,7 +62,6 @@ export async function processMessage(
 
   const { remoteJid, fromMe, id: externalId } = data.key;
 
-  if (fromMe) return skip("own outbound message");
   if (!remoteJid) return skip("empty remoteJid");
   if (shouldSkipJid(remoteJid)) return skip(`group/broadcast JID: ${remoteJid}`);
 
@@ -77,94 +76,101 @@ export async function processMessage(
     return { contactId: null, conversationId: null, isFirstMessage: false, skipped: true, skipReason: "instance not found" };
   }
 
-  const contactName = resolveContactName(data, phone);
-  const content     = extractText(data.message ?? {});
-  const msgType     = MESSAGE_TYPE_MAP[data.messageType ?? "conversation"] ?? "text";
-  const timestamp   = data.messageTimestamp
+  const content   = extractText(data.message ?? {});
+  const msgType   = MESSAGE_TYPE_MAP[data.messageType ?? "conversation"] ?? "text";
+  const timestamp = data.messageTimestamp
     ? new Date(data.messageTimestamp * 1_000).toISOString()
     : new Date().toISOString();
 
-  // ── WhatsApp native layer ─────────────────────────────────────────────────
-  const wppContactId = await upsertWhatsAppContact(supabase, config, remoteJid, phone, data);
-  const wppChatId    = await upsertWhatsAppChat(supabase, config, remoteJid, contactName, wppContactId, content, timestamp);
+  // ── WhatsApp native layer (inbound only) ──────────────────────────────────
+  // Skipped for fromMe=true: data.pushName is the agent's own WhatsApp name —
+  // passing it through would overwrite the contact's stored name.
+  if (!fromMe) {
+    const contactName  = resolveContactName(data, phone);
+    const wppContactId = await upsertWhatsAppContact(supabase, config, remoteJid, phone, data);
+    const wppChatId    = await upsertWhatsAppChat(supabase, config, remoteJid, contactName, wppContactId, content, timestamp);
 
-  let wppMessageId: string | null = null;
-  if (wppChatId) {
-    wppMessageId = await insertWhatsAppMessage(
-      supabase, config, wppChatId, data, externalId ?? `ev-${Date.now()}`,
-      remoteJid, content, msgType, timestamp
-    );
+    if (wppChatId) {
+      const wppMessageId = await insertWhatsAppMessage(
+        supabase, config, wppChatId, data, externalId ?? `ev-${Date.now()}`,
+        remoteJid, content, msgType, timestamp
+      );
 
-    // Enqueue media download if this message has an attachment
-    if (wppMessageId && data.messageType && MEDIA_TYPES.has(data.messageType)) {
-      await enqueueMedia({
-        messageId:    wppMessageId,
-        externalId:   externalId ?? "",
-        instanceName,
-        userId:       config.userId,
-        chatId:       wppChatId,
-        mediaType:    msgType as "image" | "audio" | "video" | "document" | "sticker",
-        mimeType:     extractMimeType(data.message),
-        fileName:     extractFileName(data.message),
-      }).catch((err) => console.warn("[msg-processor] enqueueMedia failed:", err));
+      if (wppMessageId && data.messageType && MEDIA_TYPES.has(data.messageType)) {
+        await enqueueMedia({
+          messageId:    wppMessageId,
+          externalId:   externalId ?? "",
+          instanceName,
+          userId:       config.userId,
+          chatId:       wppChatId,
+          mediaType:    msgType as "image" | "audio" | "video" | "document" | "sticker",
+          mimeType:     extractMimeType(data.message),
+          fileName:     extractFileName(data.message),
+        }).catch((err) => console.warn("[msg-processor] enqueueMedia failed:", err));
+      }
     }
   }
 
   // ── CRM layer ─────────────────────────────────────────────────────────────
-  const crmContactId = await upsertCrmContact(supabase, config.userId, phone, contactName);
-  const crmConv      = await upsertCrmConversation(supabase, config.userId, crmContactId, contactName, phone, config.instanceId || null);
+  // For fromMe=true, use phone as contact name placeholder so we never
+  // overwrite an existing contact's real name with the agent's push name.
+  const crmContactName = fromMe ? phone : resolveContactName(data, phone);
+  const crmContactId   = await upsertCrmContact(supabase, config.userId, phone, crmContactName);
+  const crmConv        = await upsertCrmConversation(supabase, config.userId, crmContactId, crmContactName, phone, config.instanceId || null);
 
   if (!crmConv) {
     console.error("[msg-processor] Failed to upsert CRM conversation — dropping");
     return { contactId: crmContactId, conversationId: null, isFirstMessage: false, skipped: true, skipReason: "conversation upsert failed" };
   }
 
-  await storeCrmMessage(supabase, crmConv.id, content, msgType, timestamp, externalId ?? `ev-${Date.now()}`);
+  await storeCrmMessage(supabase, crmConv.id, content, msgType, timestamp, externalId ?? `ev-${Date.now()}`, fromMe ?? false);
 
-  // ── Automation trigger ───────────────────────────────────────────────────
-  await enqueueAutomation({
-    userId:         config.userId,
-    conversationId: crmConv.id,
-    contactId:      crmContactId,
-    phone,
-    incomingText:   content,
-    isFirstMessage: crmConv.isNew,
-    instanceName,
-    serverUrl:      config.serverUrl,
-    instanceApiKey: config.apiKey,
-    triggerType:    crmConv.isNew ? "first_message" : "message_received",
-  });
-
-  // Fire conversation_created trigger for brand-new conversations
-  if (crmConv.isNew) {
+  // Automations and event bus only fire for inbound contact messages.
+  if (!fromMe) {
+    // ── Automation trigger ───────────────────────────────────────────────────
     await enqueueAutomation({
       userId:         config.userId,
       conversationId: crmConv.id,
       contactId:      crmContactId,
       phone,
       incomingText:   content,
-      isFirstMessage: true,
+      isFirstMessage: crmConv.isNew,
       instanceName,
       serverUrl:      config.serverUrl,
       instanceApiKey: config.apiKey,
-      triggerType:    "conversation_created",
-    }).catch(() => { /* non-critical */ });
+      triggerType:    crmConv.isNew ? "first_message" : "message_received",
+    });
+
+    if (crmConv.isNew) {
+      await enqueueAutomation({
+        userId:         config.userId,
+        conversationId: crmConv.id,
+        contactId:      crmContactId,
+        phone,
+        incomingText:   content,
+        isFirstMessage: true,
+        instanceName,
+        serverUrl:      config.serverUrl,
+        instanceApiKey: config.apiKey,
+        triggerType:    "conversation_created",
+      }).catch(() => { /* non-critical */ });
+    }
+
+    eventBus.emit("message:stored", {
+      instanceName,
+      userId:         config.userId,
+      conversationId: crmConv.id,
+      contactId:      crmContactId,
+      phone,
+      incomingText:   content,
+      isFirstMessage: crmConv.isNew,
+      serverUrl:      config.serverUrl,
+      instanceApiKey: config.apiKey,
+    });
   }
 
-  eventBus.emit("message:stored", {
-    instanceName,
-    userId:         config.userId,
-    conversationId: crmConv.id,
-    contactId:      crmContactId,
-    phone,
-    incomingText:   content,
-    isFirstMessage: crmConv.isNew,
-    serverUrl:      config.serverUrl,
-    instanceApiKey: config.apiKey,
-  });
-
   console.info(
-    `[msg-processor] OK — instance=${instanceName} phone=${phone}` +
+    `[msg-processor] OK — instance=${instanceName} phone=${phone} fromMe=${fromMe}` +
     ` conv=${crmConv.id} first=${crmConv.isNew}`
   );
 
@@ -556,8 +562,27 @@ async function storeCrmMessage(
   content: string,
   type: string,
   timestamp: string,
-  externalId: string
+  externalId: string,
+  isMine: boolean
 ): Promise<void> {
+  const sender: "agent" | "contact" = isMine ? "agent" : "contact";
+
+  if (isMine) {
+    // Check if this external_id was already stored by the CRM's sendMessage action
+    // (race: webhook arrives before the outbound worker sets external_id — then
+    //  the check misses and we store a second row, which is acceptable).
+    const { data: existing } = await db
+      .from("messages")
+      .select("id")
+      .eq("external_id", externalId)
+      .maybeSingle();
+
+    if (existing) {
+      console.info(`[msg-processor] fromMe dedup — external_id=${externalId} already stored`);
+      return;
+    }
+  }
+
   const crmType = (["text", "image", "audio", "document"].includes(type) ? type : "document") as
     "text" | "image" | "audio" | "document";
 
@@ -567,8 +592,8 @@ async function storeCrmMessage(
       conversation_id: conversationId,
       content,
       type:            crmType,
-      sender:          "contact" as const,
-      status:          "delivered" as const,
+      sender,
+      status:          isMine ? ("sent" as const) : ("delivered" as const),
       external_id:     externalId,
     });
 
@@ -586,10 +611,13 @@ async function storeCrmMessage(
     .update({
       last_message_at:      timestamp,
       last_message_preview: content.slice(0, 120),
-      last_message_sender:  "contact",
+      last_message_sender:  sender,
       updated_at:           now,
     })
     .eq("id", conversationId);
 
-  try { await db.rpc("increment_unread", { p_id: conversationId }); } catch { /* non-critical */ }
+  // Only increment unread for inbound contact messages
+  if (!isMine) {
+    try { await db.rpc("increment_unread", { p_id: conversationId }); } catch { /* non-critical */ }
+  }
 }

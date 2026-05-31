@@ -185,13 +185,20 @@ export async function sendMessage(
   void (async () => {
     try {
       const admin = createAdminClient();
-      const { data: conv } = await admin
+      const { data: conv, error: convErr } = await admin
         .from("conversations")
         .select("channel, instance_id, contact_phone")
         .eq("id", conversationId)
         .single();
 
-      if (!conv?.contact_phone) return;
+      if (convErr) {
+        console.error("[sendMessage] failed to read conversation:", convErr.message);
+        return;
+      }
+      if (!conv?.contact_phone) {
+        console.warn("[sendMessage] conversation missing contact_phone — bailing", { conversationId });
+        return;
+      }
 
       // ── Instagram DM ──────────────────────────────────────────────────────
       if (conv.channel === "instagram") {
@@ -246,7 +253,8 @@ export async function sendMessage(
       // created before instance_id was stored (back-compat).
       let instanceRowId = conv.instance_id;
       if (!instanceRowId) {
-        const { data: fallback } = await admin
+        console.warn("[sendMessage] conv.instance_id is null — querying fallback instance", { conversationId, userId: user.id });
+        const { data: fallback, error: fallbackErr } = await admin
           .from("whatsapp_instances")
           .select("id")
           .eq("user_id", user.id)
@@ -254,17 +262,29 @@ export async function sendMessage(
           .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle();
+        if (fallbackErr) console.error("[sendMessage] fallback instance query failed:", fallbackErr.message);
         instanceRowId = fallback?.id ?? null;
       }
-      if (!instanceRowId) return;
+      if (!instanceRowId) {
+        console.error("[sendMessage] no open whatsapp_instances row found — outbound aborted", { conversationId, userId: user.id });
+        return;
+      }
 
-      const { data: inst } = await admin
+      const { data: inst, error: instErr } = await admin
         .from("whatsapp_instances")
         .select("instance_name, server_url, api_key")
         .eq("id", instanceRowId)
         .single();
 
-      if (!inst?.instance_name || !inst.server_url || !inst.api_key) return;
+      if (instErr) {
+        console.error("[sendMessage] instance lookup failed:", instErr.message, { instanceRowId });
+        return;
+      }
+      if (!inst?.instance_name || !inst.server_url || !inst.api_key) {
+        console.error("[sendMessage] instance row missing credentials", { instanceRowId, inst });
+        return;
+      }
+      console.info("[sendMessage] enqueueing outbound", { instanceName: inst.instance_name, serverUrl: inst.server_url, phone: conv.contact_phone });
 
       await enqueueOutbound({
         instanceName: inst.instance_name,
@@ -279,8 +299,8 @@ export async function sendMessage(
         agentName:    agentName ?? undefined,
         messageId:    msg.id,
       });
-    } catch {
-      // Non-fatal — message is already in DB; the operator can retry manually
+    } catch (err) {
+      console.error("[sendMessage] outbound enqueue failed:", err);
     }
   })();
 

@@ -41,11 +41,14 @@ export function getProducerRedis(): Redis {
     maxRetriesPerRequest: 0,        // Fail immediately — don't block Vercel functions
     enableReadyCheck: false,
     lazyConnect: true,
-    connectTimeout: 3_000,          // Give up connecting after 3 s
-    // Allow up to 3 reconnect attempts (max ~1 s total) so transient Upstash
-    // idle-timeouts don't permanently kill the singleton in warm Vercel instances.
-    // After 3 failures the client gives up and the next enqueue throws fast.
-    retryStrategy: (times) => (times > 3 ? null : Math.min(times * 200, 500)),
+    connectTimeout: 3_000,          // Give up a single TCP attempt after 3 s
+    // Retry indefinitely with exponential backoff capped at 3 s.
+    // CRITICAL: returning null here permanently kills the singleton — all future
+    // queue.add() calls throw "Connection is closed." and the webhook silently
+    // drops every message until Vercel spins up a new cold instance.
+    // maxRetriesPerRequest:0 already makes individual commands fail fast during
+    // reconnection, so we can safely retry the socket forever in the background.
+    retryStrategy: (times) => Math.min(times * 200, 3_000),
   });
 
   _producerRedis.on("error", (err: Error) => console.error("[redis/producer] error:", err.message));

@@ -128,6 +128,11 @@ export async function processMessage(
   // Automations and event bus only fire for inbound contact messages.
   if (!fromMe) {
     // ── Automation trigger ───────────────────────────────────────────────────
+    // IMPORTANT: wrapped in .catch() — if the producer Redis is temporarily
+    // unavailable, throwing here would cause BullMQ to retry the entire job.
+    // Each retry re-runs storeCrmMessage and inserts duplicate message rows
+    // (no UNIQUE constraint on external_id). The automation is non-critical
+    // compared to the integrity of public.messages.
     await enqueueAutomation({
       userId:         config.userId,
       conversationId: crmConv.id,
@@ -139,6 +144,9 @@ export async function processMessage(
       serverUrl:      config.serverUrl,
       instanceApiKey: config.apiKey,
       triggerType:    crmConv.isNew ? "first_message" : "message_received",
+    }).catch((err: unknown) => {
+      console.warn("[msg-processor] enqueueAutomation failed (non-critical):",
+        err instanceof Error ? err.message : String(err));
     });
 
     if (crmConv.isNew) {

@@ -124,6 +124,9 @@ export function ConversationsShell({
           onSearchChange={setSearchQuery}
           isSearching={isSearching}
           channelFilter={channelTab}
+          onConversationCreated={(conv) => {
+            setActiveConversation(conv);
+          }}
         />
       </div>
 

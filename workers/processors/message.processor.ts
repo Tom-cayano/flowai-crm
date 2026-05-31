@@ -494,7 +494,8 @@ async function upsertCrmConversation(
     // Back-fill instance_id on conversations that were created before this fix
     if (instanceId && !existing.instance_id) updates.instance_id = instanceId;
     if (Object.keys(updates).length > 0) {
-      await db.from("conversations").update(updates).eq("id", existing.id);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await db.from("conversations").update(updates as any).eq("id", existing.id);
     }
     return { id: existing.id, isNew: false };
   }

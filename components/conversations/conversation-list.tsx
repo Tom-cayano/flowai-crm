@@ -12,6 +12,7 @@
  *     antes de pasarla a este componente
  */
 
+import { useState } from "react";
 import {
   Search,
   MessageSquarePlus,
@@ -24,6 +25,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton }   from "@/components/ui/skeleton";
 import { ChannelBadge, type Channel } from "@/components/ui/channel-badge";
 import { ConversationItem }           from "./conversation-item";
+import { NewConversationDialog }      from "./new-conversation-dialog";
 import { cn }                         from "@/lib/utils";
 import type { Conversation }          from "@/types";
 import type { InboxFilter }           from "@/lib/hooks/use-realtime-inbox";
@@ -36,15 +38,16 @@ const STATUS_FILTERS: { value: InboxFilter; label: string }[] = [
 ];
 
 interface ConversationListProps {
-  conversations:  Conversation[];
-  activeId:       string | null;
-  onSelect:       (conv: Conversation) => void;
-  filter:         InboxFilter;
-  onFilterChange: (f: InboxFilter) => void;
-  searchQuery:    string;
-  onSearchChange: (q: string) => void;
-  isLoading?:     boolean;
-  isSearching?:   boolean;
+  conversations:        Conversation[];
+  activeId:             string | null;
+  onSelect:             (conv: Conversation) => void;
+  filter:               InboxFilter;
+  onFilterChange:       (f: InboxFilter) => void;
+  searchQuery:          string;
+  onSearchChange:       (q: string) => void;
+  onConversationCreated?: (conv: Conversation) => void;
+  isLoading?:           boolean;
+  isSearching?:         boolean;
   /**
    * Cuando se pasa un canal específico (distinto de "all"), el header
    * muestra el badge del canal en lugar del título genérico "Conversaciones".
@@ -61,10 +64,12 @@ export function ConversationList({
   onFilterChange,
   searchQuery,
   onSearchChange,
+  onConversationCreated,
   isLoading      = false,
   isSearching    = false,
   channelFilter  = "all",
 }: ConversationListProps) {
+  const [newDialogOpen, setNewDialogOpen] = useState(false);
   const totalUnread      = conversations.reduce((n, c) => n + c.unreadCount, 0);
   const showChannelBadge = channelFilter !== "all";
 
@@ -91,6 +96,8 @@ export function ConversationList({
             size="icon"
             variant="ghost"
             className="h-7 w-7 text-muted-foreground hover:text-foreground"
+            onClick={() => setNewDialogOpen(true)}
+            title="Nueva conversación"
           >
             <MessageSquarePlus className="h-4 w-4" />
           </Button>
@@ -194,6 +201,16 @@ export function ConversationList({
           ))
         )}
       </ScrollArea>
+
+      <NewConversationDialog
+        open={newDialogOpen}
+        onClose={() => setNewDialogOpen(false)}
+        onCreated={(conv) => {
+          setNewDialogOpen(false);
+          onConversationCreated?.(conv);
+          onSelect(conv);
+        }}
+      />
     </div>
   );
 }

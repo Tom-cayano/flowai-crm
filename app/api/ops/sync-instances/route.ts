@@ -1,22 +1,27 @@
-// GET /api/ops/sync-instances
+// GET /api/ops/sync-instances[?userId=<uuid>]
 //
 // Syncs all Evolution API instances into whatsapp_instances table.
 // Safe to call multiple times (upsert by instance_name).
 //
-// Three-tier user resolution (applied in order):
+// User resolution — applied in order:
+//   0. ?userId=<uuid> query param (explicit override, highest priority)
 //   1. UUID prefix: instance name starts with 8-char UUID segment
-//      e.g. "2da9c9b6-flowai" → user whose UUID starts with "2da9c9b6"
-//   2. EVOLUTION_FALLBACK_USER_ID env var (explicit override)
-//   3. Workspace owner: oldest user account in auth.users (initial admin)
+//      e.g. "2da9c9b6-flowai" → user whose profile.id starts with "2da9c9b6"
+//   2. EVOLUTION_FALLBACK_USER_ID env var
+//   3. Workspace owner: owner_id from first workspace, or oldest profile
 //
-// Each resolution logs which tier was used.
+// If profiles table is empty AND no env var is set AND no workspace exists,
+// call with ?userId=<your-uuid> (find it in Supabase Dashboard → Auth → Users).
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const maxDuration = 60;
+
+// UUID v4 format: 8-4-4-4-12 hex chars
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 interface EvolutionInstance {
   name: string;
@@ -28,7 +33,7 @@ interface EvolutionInstance {
   token?: string;
 }
 
-type ResolutionTier = "uuid-prefix" | "fallback-env" | "workspace-owner";
+type ResolutionTier = "query-param" | "uuid-prefix" | "fallback-env" | "workspace-owner";
 
 interface ResolutionResult {
   userId: string;
@@ -37,10 +42,17 @@ interface ResolutionResult {
 
 function resolveUser(
   instanceName: string,
+  explicitUserId: string | null,
   prefixToUser: Map<string, string>,
   fallbackUserId: string | null,
   workspaceOwnerId: string | null
 ): ResolutionResult | null {
+  // Tier 0 — explicit ?userId= query param
+  if (explicitUserId) {
+    console.log(`[sync-instances] "${instanceName}" → resolved via query-param → ${explicitUserId}`);
+    return { userId: explicitUserId, tier: "query-param" };
+  }
+
   // Tier 1 — UUID prefix (e.g. "2da9c9b6-flowai" → prefix "2da9c9b6")
   const nameParts = instanceName.split("-");
   const prefix    = nameParts[0] ?? "";
@@ -50,23 +62,38 @@ function resolveUser(
     return { userId: byPrefix, tier: "uuid-prefix" };
   }
 
-  // Tier 2 — EVOLUTION_FALLBACK_USER_ID
+  // Tier 2 — EVOLUTION_FALLBACK_USER_ID env var
   if (fallbackUserId) {
     console.log(`[sync-instances] "${instanceName}" → uuid-prefix "${prefix}" not found; using EVOLUTION_FALLBACK_USER_ID ${fallbackUserId}`);
     return { userId: fallbackUserId, tier: "fallback-env" };
   }
 
-  // Tier 3 — workspace owner (oldest account)
+  // Tier 3 — workspace owner (first workspace or oldest profile)
   if (workspaceOwnerId) {
-    console.log(`[sync-instances] "${instanceName}" → uuid-prefix "${prefix}" not found, no fallback env; using workspace owner ${workspaceOwnerId}`);
+    console.log(`[sync-instances] "${instanceName}" → uuid-prefix "${prefix}" not found, no env fallback; using workspace owner ${workspaceOwnerId}`);
     return { userId: workspaceOwnerId, tier: "workspace-owner" };
   }
 
-  console.warn(`[sync-instances] WARNING: "${instanceName}" — all three resolution tiers failed. Instance will NOT be registered.`);
+  console.warn(
+    `[sync-instances] WARNING: "${instanceName}" — ALL resolution tiers failed.\n` +
+    `  Fix options:\n` +
+    `    A. Call with ?userId=<uuid>  (find in Supabase → Auth → Users)\n` +
+    `    B. Set EVOLUTION_FALLBACK_USER_ID in Vercel env vars\n` +
+    `    C. Ensure a workspace or profile row exists in the DB`
+  );
   return null;
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const { searchParams } = request.nextUrl;
+
+  // Optional explicit userId override
+  const rawUserId = searchParams.get("userId")?.trim() ?? null;
+  const explicitUserId = rawUserId && UUID_RE.test(rawUserId) ? rawUserId : null;
+  if (rawUserId && !explicitUserId) {
+    return NextResponse.json({ error: `?userId="${rawUserId}" is not a valid UUID v4` }, { status: 400 });
+  }
+
   const serverUrl = (process.env.EVOLUTION_SERVER_URL ?? "").replace(/\/$/, "");
   const apiKey    = (process.env.EVOLUTION_API_KEY ?? "").trim();
 
@@ -89,34 +116,30 @@ export async function GET() {
   }
 
   const instances = (await res.json()) as EvolutionInstance[];
-  console.log(`[sync-instances] Found ${instances.length} Evolution instance(s):`, instances.map((i) => i.name));
+  console.log(
+    `[sync-instances] Found ${instances.length} Evolution instance(s):`,
+    instances.map((i) => i.name)
+  );
 
-  // 2. Load all users via the profiles table (avoids auth.admin.listUsers() which
-  //    requires a special Supabase permission not always available on all plans).
   const db = createAdminClient();
 
-  const { data: profiles, error: profilesError } = await db
+  // 2. Build prefix → userId map from profiles (Tier 1)
+  const { data: profiles } = await db
     .from("profiles")
     .select("id, email, created_at")
     .order("created_at", { ascending: true });
 
-  if (profilesError) {
-    return NextResponse.json({ error: "Failed to list profiles", detail: profilesError.message }, { status: 500 });
-  }
-
   const allProfiles = profiles ?? [];
-
-  // Map: 8-char UUID prefix (no dashes) → full user_id
   const prefixToUser = new Map<string, string>();
   for (const p of allProfiles) {
     const prefix = p.id.split("-")[0];
     if (prefix) prefixToUser.set(prefix, p.id);
   }
 
-  // Tier 2: explicit fallback from env
+  // Tier 2: explicit env fallback
   const fallbackUserId = process.env.EVOLUTION_FALLBACK_USER_ID?.trim() || null;
 
-  // Tier 3: workspace owner from the workspaces table
+  // Tier 3: workspace owner
   const { data: firstWorkspace } = await db
     .from("workspaces")
     .select("owner_id")
@@ -125,7 +148,13 @@ export async function GET() {
     .maybeSingle();
   const workspaceOwnerId = firstWorkspace?.owner_id ?? allProfiles[0]?.id ?? null;
 
-  console.log(`[sync-instances] Profiles loaded: ${allProfiles.length}, fallbackUserId: ${fallbackUserId ?? "not set"}, workspaceOwner: ${workspaceOwnerId ?? "none"} (${allProfiles.find((p) => p.id === workspaceOwnerId)?.email ?? "unknown email"})`);
+  console.log(
+    `[sync-instances] Resolution context:` +
+    ` explicitUserId=${explicitUserId ?? "none"}` +
+    ` profiles=${allProfiles.length}` +
+    ` fallbackEnv=${fallbackUserId ?? "not set"}` +
+    ` workspaceOwner=${workspaceOwnerId ?? "none"}`
+  );
 
   const results: Array<{
     instance: string;
@@ -140,26 +169,34 @@ export async function GET() {
     const name = inst.name;
     if (!name || name === "__auth_probe__") continue;
 
-    const resolution = resolveUser(name, prefixToUser, fallbackUserId, workspaceOwnerId);
+    const resolution = resolveUser(
+      name,
+      explicitUserId,
+      prefixToUser,
+      fallbackUserId,
+      workspaceOwnerId
+    );
 
     if (!resolution) {
-      const reason = `All resolution tiers failed — no uuid-prefix match, EVOLUTION_FALLBACK_USER_ID not set, no users in DB`;
-      console.warn(`[sync-instances] SKIPPED "${name}": ${reason}`);
-      results.push({ instance: name, action: "skipped", reason });
+      results.push({
+        instance: name,
+        action:   "skipped",
+        reason:   "All resolution tiers failed — call with ?userId=<uuid> or set EVOLUTION_FALLBACK_USER_ID",
+      });
       continue;
     }
 
     const nameParts = name.split("-");
-    // If resolved by uuid-prefix, label is everything after the first segment.
-    // Otherwise keep the full instance name as the label.
     const label =
       resolution.tier === "uuid-prefix"
         ? (nameParts.slice(1).join("-") || name)
         : name;
 
-    const connState = (["open", "close", "connecting"].includes(inst.connectionStatus ?? "")
-      ? inst.connectionStatus
-      : "close") as "open" | "close" | "connecting";
+    const connState = (
+      ["open", "close", "connecting"].includes(inst.connectionStatus ?? "")
+        ? inst.connectionStatus
+        : "close"
+    ) as "open" | "close" | "connecting";
 
     const { error } = await db
       .from("whatsapp_instances")
@@ -183,24 +220,39 @@ export async function GET() {
 
     if (error) {
       console.error(`[sync-instances] DB error for "${name}":`, error.message);
-      results.push({ instance: name, action: "error", resolvedBy: resolution.tier, userId: resolution.userId, reason: error.message });
+      results.push({
+        instance:   name,
+        action:     "error",
+        resolvedBy: resolution.tier,
+        userId:     resolution.userId,
+        reason:     error.message,
+      });
     } else {
       console.log(`[sync-instances] Upserted "${name}" → user ${resolution.userId} (${resolution.tier})`);
-      results.push({ instance: name, action: "upserted", resolvedBy: resolution.tier, userId: resolution.userId });
+      results.push({
+        instance:   name,
+        action:     "upserted",
+        resolvedBy: resolution.tier,
+        userId:     resolution.userId,
+      });
     }
   }
 
   const summary = {
     instanceCount: instances.length,
-    processed: results.length,
-    upserted:  results.filter((r) => r.action === "upserted").length,
-    skipped:   results.filter((r) => r.action === "skipped").length,
-    errors:    results.filter((r) => r.action === "error").length,
+    processed:     results.length,
+    upserted:      results.filter((r) => r.action === "upserted").length,
+    skipped:       results.filter((r) => r.action === "skipped").length,
+    errors:        results.filter((r) => r.action === "error").length,
     resolutionBreakdown: {
-      byUuidPrefix:    results.filter((r) => r.resolvedBy === "uuid-prefix").length,
-      byFallbackEnv:   results.filter((r) => r.resolvedBy === "fallback-env").length,
-      byWorkspaceOwner:results.filter((r) => r.resolvedBy === "workspace-owner").length,
+      byQueryParam:     results.filter((r) => r.resolvedBy === "query-param").length,
+      byUuidPrefix:     results.filter((r) => r.resolvedBy === "uuid-prefix").length,
+      byFallbackEnv:    results.filter((r) => r.resolvedBy === "fallback-env").length,
+      byWorkspaceOwner: results.filter((r) => r.resolvedBy === "workspace-owner").length,
     },
+    hint: results.some((r) => r.action === "skipped")
+      ? "Some instances were skipped. Pass ?userId=<uuid> (Supabase → Auth → Users) to force-assign them."
+      : null,
     results,
   };
 

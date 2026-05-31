@@ -246,11 +246,18 @@ async function resolveInstance(
   db: DB,
   instanceName: string
 ): Promise<InstanceConfig | null> {
-  const { data } = await db
+  const { data, error } = await db
     .from("whatsapp_instances")
     .select("id, user_id, instance_name, server_url, api_key")
     .eq("instance_name", instanceName)
     .maybeSingle();
+
+  if (error) {
+    console.warn("[msg-processor] resolveInstance DB error — will use env fallback", {
+      instanceName,
+      error: error.message,
+    });
+  }
 
   if (data) {
     return {
@@ -262,9 +269,10 @@ async function resolveInstance(
     };
   }
 
-  // Fallback for dev environments
-  const fallbackUserId = process.env.EVOLUTION_FALLBACK_USER_ID;
+  // Fallback for dev environments or when DB query fails
+  const fallbackUserId = process.env.EVOLUTION_FALLBACK_USER_ID?.trim();
   if (fallbackUserId) {
+    console.info("[msg-processor] resolveInstance using env fallback", { instanceName, fallbackUserId });
     return {
       userId:       fallbackUserId,
       instanceId:   "",
@@ -475,6 +483,24 @@ async function upsertCrmConversation(
   contactPhone: string,
   instanceId: string | null
 ): Promise<{ id: string; isNew: boolean } | null> {
+  // If instanceId wasn't resolved (worker fell back to env var path), look it up now.
+  // This makes the conversation creation resilient to resolveInstance() fallback.
+  let effectiveInstanceId = instanceId || null;
+  if (!effectiveInstanceId) {
+    const { data: inst } = await db
+      .from("whatsapp_instances")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("connection_state", "open")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    effectiveInstanceId = inst?.id ?? null;
+    if (effectiveInstanceId) {
+      console.info("[msg-processor] resolved instance_id from open instance fallback", { userId, effectiveInstanceId });
+    }
+  }
+
   const { data: existing } = await db
     .from("conversations")
     .select("id, contact_name, instance_id")
@@ -491,8 +517,8 @@ async function upsertCrmConversation(
     const hasRealName    = contactName && contactName !== contactPhone;
     const isPlaceholder  = !existing.contact_name || existing.contact_name === contactPhone;
     if (hasRealName && isPlaceholder) updates.contact_name = contactName;
-    // Back-fill instance_id on conversations that were created before this fix
-    if (instanceId && !existing.instance_id) updates.instance_id = instanceId;
+    // Back-fill instance_id on conversations that were created without it
+    if (effectiveInstanceId && !existing.instance_id) updates.instance_id = effectiveInstanceId;
     if (Object.keys(updates).length > 0) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await db.from("conversations").update(updates as any).eq("id", existing.id);
@@ -511,7 +537,7 @@ async function upsertCrmConversation(
       channel:       "whatsapp" as const,
       tags:          [] as string[],
       unread_count:  0,
-      instance_id:   instanceId,
+      instance_id:   effectiveInstanceId,
     })
     .select("id")
     .single();

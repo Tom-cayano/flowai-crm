@@ -390,6 +390,7 @@ async function upsertWhatsAppChat(
     .maybeSingle();
 
   if (existing) {
+    // First: update the preview and timestamp fields
     await db
       .from("whatsapp_chats")
       .update({
@@ -675,6 +676,8 @@ async function storeCrmMessage(
     throw new Error(`[storeCrmMessage] insert failed: ${error.message}`);
   }
 
+  // Always update conversation preview — the dedup check above guarantees
+  // we only reach here on a fresh successful insert.
   const now = new Date().toISOString();
   await db
     .from("conversations")
@@ -691,3 +694,4 @@ async function storeCrmMessage(
     try { await db.rpc("increment_unread", { p_id: conversationId }); } catch { /* non-critical */ }
   }
 }
+

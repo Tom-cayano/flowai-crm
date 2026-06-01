@@ -42,7 +42,10 @@ interface EvolutionSendMessageData {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const WEBHOOK_SECRET = process.env.EVOLUTION_WEBHOOK_SECRET ?? "";
+const WEBHOOK_SECRET       = process.env.EVOLUTION_WEBHOOK_SECRET ?? "";
+// Canonical instance name — rejects any webhook from a different instance.
+// Set to "" to disable the check (multi-tenant mode).
+const CANONICAL_INSTANCE   = process.env.EVOLUTION_INSTANCE_NAME ?? "";
 
 // ─── GET — health / verification ─────────────────────────────────────────────
 
@@ -90,7 +93,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
   }
 
-  // ── 3. Log every incoming event ───────────────────────────────────────────
+  // ── 3. Instance guard ─────────────────────────────────────────────────────
+  if (CANONICAL_INSTANCE && instance !== CANONICAL_INSTANCE) {
+    console.warn("[INSTANCE_CHECK] mismatch — rejecting", {
+      expected: CANONICAL_INSTANCE,
+      received: instance,
+      event,
+    });
+    return NextResponse.json({ success: false, error: "Unknown instance" }, { status: 400 });
+  }
+  console.log("[INSTANCE_CHECK] ok", { expected: CANONICAL_INSTANCE || "(any)", received: instance });
+
+  // ── 4. Log every incoming event ───────────────────────────────────────────
   console.log("[TRACE_A] webhook received", {
     traceId,
     event,

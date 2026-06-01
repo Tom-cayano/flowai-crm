@@ -65,6 +65,16 @@ export async function processMessage(
   if (!remoteJid) return skip("empty remoteJid");
   if (shouldSkipJid(remoteJid)) return skip(`group/broadcast JID: ${remoteJid}`);
 
+  const canonicalInstance = process.env.EVOLUTION_INSTANCE_NAME ?? "";
+  if (canonicalInstance && instanceName !== canonicalInstance) {
+    console.warn("[INSTANCE_CHECK] mismatch in worker — dropping", {
+      expected: canonicalInstance,
+      received: instanceName,
+    });
+    return skip(`instance mismatch: expected ${canonicalInstance}, got ${instanceName}`);
+  }
+  console.log("[INSTANCE_CHECK] ok", { expected: canonicalInstance || "(any)", received: instanceName });
+
   console.log("[TRACE_C] job processing", {
     traceId,
     msgId:    externalId,

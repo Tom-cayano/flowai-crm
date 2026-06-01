@@ -134,7 +134,7 @@ export async function processMessage(
   // overwrite an existing contact's real name with the agent's push name.
   const crmContactName = fromMe ? phone : resolveContactName(data, phone);
   const crmContactId   = await upsertCrmContact(supabase, config.userId, phone, crmContactName);
-  const crmConv        = await upsertCrmConversation(supabase, config.userId, crmContactId, crmContactName, phone, config.instanceId || null);
+  const crmConv        = await upsertCrmConversation(supabase, config.userId, config.instanceId, crmContactId, crmContactName, phone);
 
   if (!crmConv) {
     console.error("[msg-processor] Failed to upsert CRM conversation — dropping");
@@ -532,10 +532,10 @@ async function upsertCrmContact(
 async function upsertCrmConversation(
   db: DB,
   userId: string,
+  instanceId: string,
   contactId: string | null,
   contactName: string,
-  contactPhone: string,
-  instanceId: string | null
+  contactPhone: string
 ): Promise<{ id: string; isNew: boolean } | null> {
   // If instanceId wasn't resolved (worker fell back to env var path), look it up now.
   // This makes the conversation creation resilient to resolveInstance() fallback.
@@ -568,11 +568,13 @@ async function upsertCrmConversation(
 
   if (existing) {
     const updates: Record<string, unknown> = {};
-    const hasRealName    = contactName && contactName !== contactPhone;
-    const isPlaceholder  = !existing.contact_name || existing.contact_name === contactPhone;
+    const hasRealName   = contactName && contactName !== contactPhone;
+    const isPlaceholder = !existing.contact_name || existing.contact_name === contactPhone;
+    const needsInstanceId = effectiveInstanceId && !existing.instance_id;
+
     if (hasRealName && isPlaceholder) updates.contact_name = contactName;
-    // Back-fill instance_id on conversations that were created without it
-    if (effectiveInstanceId && !existing.instance_id) updates.instance_id = effectiveInstanceId;
+    if (needsInstanceId) updates.instance_id = effectiveInstanceId;
+
     if (Object.keys(updates).length > 0) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await db.from("conversations").update(updates as any).eq("id", existing.id);
@@ -584,6 +586,7 @@ async function upsertCrmConversation(
     .from("conversations")
     .insert({
       user_id:       userId,
+      instance_id:   effectiveInstanceId,
       contact_id:    contactId,
       contact_name:  contactName,
       contact_phone: contactPhone,
@@ -591,7 +594,6 @@ async function upsertCrmConversation(
       channel:       "whatsapp" as const,
       tags:          [] as string[],
       unread_count:  0,
-      instance_id:   effectiveInstanceId,
     })
     .select("id")
     .single();

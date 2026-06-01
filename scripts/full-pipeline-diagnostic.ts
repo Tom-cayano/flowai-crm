@@ -1,4 +1,5 @@
 #!/usr/bin/env tsx
+<<<<<<< HEAD
 // FlowAI CRM — Full Pipeline Diagnostic
 // Usage: npx tsx scripts/full-pipeline-diagnostic.ts
 //
@@ -400,4 +401,263 @@ async function main() {
 main().catch((err) => {
   console.error("Diagnostic crashed:", err);
   process.exit(2);
+=======
+/**
+ * FlowAI CRM — Full Pipeline Diagnostic
+ * Run: npx tsx scripts/full-pipeline-diagnostic.ts
+ *
+ * Checks each stage of:
+ *   WhatsApp → Evolution → Webhook → Queue → Worker → Supabase → CRM UI
+ */
+
+import { createClient } from "@supabase/supabase-js";
+// Node.js 20 doesn't have native WebSocket — disable realtime for this script
+const noopWs = class {} as unknown as typeof WebSocket;
+
+
+// ─── Config ───────────────────────────────────────────────────────────────────
+
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+const EVOLUTION_URL = (process.env.EVOLUTION_SERVER_URL ?? "").replace(/\/$/, "");
+const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY ?? "";
+
+const RED    = "\x1b[31m";
+const GREEN  = "\x1b[32m";
+const YELLOW = "\x1b[33m";
+const CYAN   = "\x1b[36m";
+const RESET  = "\x1b[0m";
+const BOLD   = "\x1b[1m";
+
+function ok(label: string, detail?: string) {
+  console.log(`  ${GREEN}✔${RESET} ${label}${detail ? `  ${YELLOW}(${detail})${RESET}` : ""}`);
+}
+function fail(label: string, detail?: string) {
+  console.log(`  ${RED}✖${RESET} ${label}${detail ? `  ${RED}→ ${detail}${RESET}` : ""}`);
+}
+function warn(label: string, detail?: string) {
+  console.log(`  ${YELLOW}⚠${RESET} ${label}${detail ? `  ${YELLOW}(${detail})${RESET}` : ""}`);
+}
+function section(title: string) {
+  console.log(`\n${BOLD}${CYAN}▶ ${title}${RESET}`);
+}
+
+// ─── Main ─────────────────────────────────────────────────────────────────────
+
+async function main() {
+  console.log(`\n${BOLD}FlowAI CRM — Full Pipeline Diagnostic${RESET}`);
+  console.log("━".repeat(50));
+
+  let totalFail = 0;
+
+  // ── 1. Environment variables ──────────────────────────────────────────────
+  section("1. Environment Variables");
+  const envChecks: [string, string][] = [
+    ["NEXT_PUBLIC_SUPABASE_URL",   SUPABASE_URL],
+    ["SUPABASE_SERVICE_ROLE_KEY",  SUPABASE_SERVICE_KEY],
+    ["EVOLUTION_SERVER_URL",       EVOLUTION_URL],
+    ["EVOLUTION_API_KEY",          EVOLUTION_API_KEY],
+  ];
+  for (const [key, val] of envChecks) {
+    if (val) ok(key, `${val.slice(0, 30)}…`);
+    else { fail(key, "NOT SET"); totalFail++; }
+  }
+
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
+    console.log(`\n${RED}Cannot continue — Supabase env missing.${RESET}`);
+    process.exit(1);
+  }
+
+  const db = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
+    realtime: { transport: noopWs },
+  });
+
+
+  // ── 2. Evolution API reachability ─────────────────────────────────────────
+  section("2. Evolution API Reachability");
+  try {
+    const res = await fetch(`${EVOLUTION_URL}/instance/fetchInstances`, {
+      headers: { apikey: EVOLUTION_API_KEY },
+    });
+    if (res.ok) {
+      const data = await res.json() as unknown[];
+      ok(`Evolution API responded`, `${res.status} — ${Array.isArray(data) ? data.length : "?"} instances`);
+    } else {
+      fail(`Evolution API HTTP ${res.status}`);
+      totalFail++;
+    }
+  } catch (e) {
+    fail("Evolution API unreachable", String(e));
+    totalFail++;
+  }
+
+  // ── 3. Supabase: whatsapp_instances ──────────────────────────────────────
+  section("3. Supabase: whatsapp_instances");
+  const { data: instances, error: instErr } = await db
+    .from("whatsapp_instances")
+    .select("id, instance_name, connection_state, user_id, server_url, api_key")
+    .order("created_at", { ascending: false });
+
+  if (instErr) { fail("Query failed", instErr.message); totalFail++; }
+  else if (!instances?.length) {
+    warn("No instances found");
+  } else {
+    ok(`Found ${instances.length} instance(s)`);
+    for (const inst of instances) {
+      const stateColor = inst.connection_state === "open" ? GREEN : YELLOW;
+      console.log(`    ${stateColor}•${RESET} ${inst.instance_name}  state=${inst.connection_state}  user=${inst.user_id?.slice(0, 8)}…`);
+      if (!inst.server_url || !inst.api_key) {
+        fail(`  ${inst.instance_name} — missing server_url or api_key`);
+        totalFail++;
+      }
+    }
+  }
+
+  // ── 4. Supabase: conversations.instance_id populated? ────────────────────
+  section("4. Supabase: conversations.instance_id (ROOT CAUSE CHECK)");
+  const { data: convStats } = await db
+    .from("conversations")
+    .select("instance_id")
+    .eq("channel", "whatsapp");
+
+  if (convStats) {
+    const total  = convStats.length;
+    const noInst = convStats.filter(c => !c.instance_id).length;
+    const withInst = total - noInst;
+    if (total === 0) {
+      warn("No WhatsApp conversations found");
+    } else if (noInst === total) {
+      fail(`ALL ${total} conversations have instance_id = NULL`, "outbound send broken for all");
+      totalFail++;
+    } else if (noInst > 0) {
+      warn(`${noInst}/${total} conversations have instance_id = NULL`, "existing convs will NOT get replies");
+      totalFail++;
+    } else {
+      ok(`All ${total} conversations have instance_id set`);
+    }
+  }
+
+  // ── 5. Backfill NULL instance_id on existing conversations ────────────────
+  section("5. Backfill: set instance_id on existing NULL conversations");
+  if (instances?.length) {
+    let backfilled = 0;
+    for (const inst of instances) {
+      // Find conversations for this instance's user that are missing instance_id
+      const { data: nullConvs } = await db
+        .from("conversations")
+        .select("id")
+        .eq("user_id", inst.user_id)
+        .eq("channel", "whatsapp")
+        .is("instance_id", null)
+        .limit(500);
+
+      if (nullConvs?.length) {
+        const ids = nullConvs.map(c => c.id);
+        const { error: upErr } = await db
+          .from("conversations")
+          .update({ instance_id: inst.id })
+          .in("id", ids);
+
+        if (upErr) {
+          fail(`Backfill for ${inst.instance_name}`, upErr.message);
+          totalFail++;
+        } else {
+          ok(`Backfilled ${ids.length} conversations → instance ${inst.instance_name}`);
+          backfilled += ids.length;
+        }
+      }
+    }
+    if (backfilled === 0) warn("No conversations needed backfill (already patched or no conversations)");
+  }
+
+  // ── 6. Webhook endpoint reachability ─────────────────────────────────────
+  section("6. Webhook Endpoint");
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://flowaicrm.com";
+  try {
+    const res = await fetch(`${appUrl}/api/webhook/whatsapp`);
+    if (res.ok) {
+      const data = await res.json() as { success?: boolean };
+      ok(`Webhook GET ${appUrl}/api/webhook/whatsapp`, `success=${data?.success}`);
+    } else {
+      fail(`Webhook responded ${res.status}`);
+      totalFail++;
+    }
+  } catch (e) {
+    fail("Webhook unreachable", String(e));
+    totalFail++;
+  }
+
+  // ── 7. Worker heartbeats ──────────────────────────────────────────────────
+  section("7. Worker Heartbeats");
+  const { data: heartbeats } = await db
+    .from("worker_heartbeats")
+    .select("worker_id, last_beat, version")
+    .order("last_beat", { ascending: false });
+
+  if (!heartbeats?.length) {
+    fail("No active workers", "worker process not running");
+    totalFail++;
+  } else {
+    for (const hb of heartbeats) {
+      const ageMs = Date.now() - new Date(hb.last_beat).getTime();
+      const ageSec = Math.round(ageMs / 1000);
+      const stale = ageMs > 90_000;
+      if (stale) {
+        fail(`Worker stale: ${hb.worker_id}`, `last beat ${ageSec}s ago`);
+        totalFail++;
+      } else {
+        ok(`Worker alive: ${hb.worker_id}`, `last beat ${ageSec}s ago`);
+      }
+    }
+  }
+
+  // ── 8. Recent messages in Supabase ───────────────────────────────────────
+  section("8. Recent Messages in Supabase");
+  const { data: recentMsgs } = await db
+    .from("messages")
+    .select("id, conversation_id, sender, created_at, content")
+    .order("created_at", { ascending: false })
+    .limit(5);
+
+  if (!recentMsgs?.length) {
+    warn("No messages found in messages table");
+  } else {
+    ok(`${recentMsgs.length} recent messages found`);
+    for (const m of recentMsgs) {
+      const age = Math.round((Date.now() - new Date(m.created_at).getTime()) / 1000);
+      console.log(`    • [${m.sender}] ${m.content?.slice(0, 40) ?? "(no content)"}  (${age}s ago)`);
+    }
+  }
+
+  // ── 9. DLQ failures ──────────────────────────────────────────────────────
+  section("9. Dead Letter Queue (failed jobs)");
+  const { data: dlqRows } = await db
+    .from("dlq_failures")
+    .select("queue_name, error, created_at")
+    .order("created_at", { ascending: false })
+    .limit(5);
+
+  if (!dlqRows?.length) {
+    ok("No DLQ failures");
+  } else {
+    warn(`${dlqRows.length} recent DLQ failure(s)`);
+    for (const row of dlqRows) {
+      console.log(`    ${RED}✖${RESET} [${row.queue_name}] ${row.error?.slice(0, 80)}  (${row.created_at})`);
+    }
+  }
+
+  // ── Summary ───────────────────────────────────────────────────────────────
+  console.log("\n" + "━".repeat(50));
+  if (totalFail === 0) {
+    console.log(`${GREEN}${BOLD}✔ ALL CHECKS PASSED — pipeline is healthy${RESET}\n`);
+  } else {
+    console.log(`${RED}${BOLD}✖ ${totalFail} CHECK(S) FAILED — see above for details${RESET}\n`);
+    process.exit(1);
+  }
+}
+
+main().catch((err) => {
+  console.error("\nDiagnostic crashed:", err);
+  process.exit(1);
+>>>>>>> d088981 (fix(message-processor): persist instance_id on conversations table)
 });

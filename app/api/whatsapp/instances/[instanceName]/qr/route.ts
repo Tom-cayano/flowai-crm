@@ -48,23 +48,28 @@ export async function GET(
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 
-  const result = await client.getQRCode(instanceName);
+  let result;
+  try {
+    result = await client.getQRCode(instanceName);
+  } catch (err) {
+    // Network error / timeout — keep polling, don't hard-fail the modal
+    console.warn("[qr/route] getQRCode threw:", err instanceof Error ? err.message : String(err));
+    return NextResponse.json({}, { status: 202 });
+  }
 
   if (!result.ok) {
-    const errMsg =
-      typeof result.data === "object" && result.data !== null && "message" in result.data
-        ? String((result.data as { message: string }).message)
-        : `HTTP ${result.status}`;
-    return NextResponse.json({ error: errMsg }, { status: 502 });
+    // Any Evolution error during QR fetch → keep polling (return 202).
+    // Never hard-fail the modal from a transient Evolution API error.
+    console.warn("[qr/route] Evolution non-ok", { status: result.status, instanceName });
+    await client.restartInstance(instanceName).catch(() => { /* non-blocking */ });
+    return NextResponse.json({}, { status: 202 });
   }
 
   // result.data is EvolutionQRCode — extract base64 directly
   const base64 = result.data.base64 ?? null;
   if (!base64) {
-    return NextResponse.json(
-      { error: "QR not ready — retry in a few seconds" },
-      { status: 202 }
-    );
+    // QR not ready yet — keep polling
+    return NextResponse.json({}, { status: 202 });
   }
 
   return NextResponse.json({ base64 });

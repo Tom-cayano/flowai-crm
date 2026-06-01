@@ -19,6 +19,8 @@ import type {
   EvolutionMessageContent,
   EvolutionMessageType,
 } from "@/types/evolution";
+import { getUserPrimaryWorkspace } from "@/lib/rbac/permissions";
+import { incrementUsage } from "@/lib/billing/usage";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -141,7 +143,14 @@ export async function processMessage(
     return { contactId: crmContactId, conversationId: null, isFirstMessage: false, skipped: true, skipReason: "conversation upsert failed" };
   }
 
-  await storeCrmMessage(supabase, crmConv.id, content, msgType, timestamp, externalId ?? `ev-${Date.now()}`, fromMe ?? false);
+  const inserted = await storeCrmMessage(supabase, crmConv.id, content, msgType, timestamp, externalId ?? `ev-${Date.now()}`, fromMe ?? false);
+
+  if (fromMe && inserted) {
+    const workspaceId = await getUserPrimaryWorkspace(config.userId);
+    if (workspaceId) {
+      void incrementUsage(workspaceId, "messages_sent");
+    }
+  }
 
   console.log("[TRACE_D] message stored", {
     traceId,
@@ -629,7 +638,7 @@ async function storeCrmMessage(
   timestamp: string,
   externalId: string,
   isMine: boolean
-): Promise<void> {
+): Promise<boolean> {
   const sender: "agent" | "contact" = isMine ? "agent" : "contact";
 
   // Dedup check for ALL messages (not just fromMe) — prevents duplicate rows
@@ -643,7 +652,7 @@ async function storeCrmMessage(
 
   if (existing) {
     console.info(`[msg-processor] dedup — external_id=${externalId} already stored`);
-    return;
+    return false;
   }
 
   const crmType = (["text", "image", "audio", "document"].includes(type) ? type : "document") as
@@ -664,7 +673,7 @@ async function storeCrmMessage(
     // Duplicate: another concurrent path already stored this — safe to skip.
     if (error.code === "23505" || error.message.includes("duplicate")) {
       console.info(`[msg-processor] dedup (DB constraint) — external_id=${externalId}`);
-      return; // Skip conversation update — already done by the first writer
+      return false; // Skip conversation update — already done by the first writer
     }
     // Real error: throw so BullMQ retries the job instead of silently losing the message.
     console.error("[msg-processor] messages insert FAILED — will retry", {
@@ -693,5 +702,7 @@ async function storeCrmMessage(
   if (!isMine) {
     try { await db.rpc("increment_unread", { p_id: conversationId }); } catch { /* non-critical */ }
   }
+
+  return true;
 }
 

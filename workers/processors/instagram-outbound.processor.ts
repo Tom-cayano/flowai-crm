@@ -14,6 +14,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { sendDM, IGApiError } from "@/lib/instagram/client";
 import { getAccessToken } from "@/lib/instagram/token-store";
 import type { IGOutboundJob } from "@/lib/queue/types";
+import { getUserPrimaryWorkspace } from "@/lib/rbac/permissions";
+import { incrementUsage } from "@/lib/billing/usage";
 
 // Minimum delay between consecutive DM sends to the same page (ms).
 // Keeps us well within Meta's 250 conversations/hour limit.
@@ -78,6 +80,11 @@ export async function processIGOutbound(job: IGOutboundJob): Promise<void> {
     await db.from("messages")
       .update({ external_id: externalId, status: "sent" })
       .eq("id", job.messageId);
+  } else if (externalId) {
+    const workspaceId = await getUserPrimaryWorkspace(job.userId);
+    if (workspaceId) {
+      void incrementUsage(workspaceId, "messages_sent");
+    }
   }
 
   // ── Update conversation preview ───────────────────────────────────────────

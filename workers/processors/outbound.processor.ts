@@ -15,6 +15,8 @@ import {
 import { getRedis } from "@/lib/redis/client";
 import { eventBus } from "@/lib/event-bus";
 import type { OutboundJob, OutboundJobResult } from "@/lib/queue/types";
+import { getUserPrimaryWorkspace } from "@/lib/rbac/permissions";
+import { incrementUsage } from "@/lib/billing/usage";
 
 export async function processOutbound(job: OutboundJob): Promise<OutboundJobResult> {
   const { instanceName, serverUrl, apiKey, phone, content, conversationId, origin } = job;
@@ -90,6 +92,11 @@ export async function processOutbound(job: OutboundJob): Promise<OutboundJobResu
         agent_name:      job.agentName ?? "FlowAI",
         external_id:     result.externalId ?? null,
       });
+
+    const workspaceId = await getUserPrimaryWorkspace(job.userId);
+    if (workspaceId) {
+      void incrementUsage(workspaceId, "messages_sent");
+    }
   }
 
   // Update conversation last_message fields

@@ -8,6 +8,8 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendMessengerMessage, getPageAccessToken } from "@/lib/messenger/client";
 import type { FBOutboundJob } from "@/lib/queue/types";
+import { getUserPrimaryWorkspace } from "@/lib/rbac/permissions";
+import { incrementUsage } from "@/lib/billing/usage";
 
 export async function processMessengerOutbound(job: FBOutboundJob): Promise<void> {
   // ── Resolve page access token ──────────────────────────────────────────────
@@ -31,6 +33,11 @@ export async function processMessengerOutbound(job: FBOutboundJob): Promise<void
       .from("messages")
       .update({ external_id: result.message_id, status: "sent" })
       .eq("id", job.messageId);
+  } else if (result.message_id) {
+    const workspaceId = await getUserPrimaryWorkspace(job.userId);
+    if (workspaceId) {
+      void incrementUsage(workspaceId, "messages_sent");
+    }
   }
 
   console.info(

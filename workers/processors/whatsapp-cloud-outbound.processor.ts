@@ -8,6 +8,8 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { WACOutboundJob } from "@/lib/queue/types";
+import { getUserPrimaryWorkspace } from "@/lib/rbac/permissions";
+import { incrementUsage } from "@/lib/billing/usage";
 
 type DB = ReturnType<typeof createAdminClient>;
 
@@ -43,6 +45,11 @@ export async function processWACOutbound(job: WACOutboundJob): Promise<void> {
       .from("messages")
       .update({ external_id: wamid, status: "sent" })
       .eq("id", job.messageId);
+  } else if (wamid) {
+    const workspaceId = await getUserPrimaryWorkspace(job.userId);
+    if (workspaceId) {
+      void incrementUsage(workspaceId, "messages_sent");
+    }
   }
 
   console.info(

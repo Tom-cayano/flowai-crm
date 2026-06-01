@@ -67,6 +67,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const receivedAt = new Date().toISOString();
+  const traceId    = `tr-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 
   // ── 1. Parse JSON ────────────────────────────────────────────────────────
   let body: Record<string, unknown>;
@@ -90,7 +91,8 @@ export async function POST(request: NextRequest) {
   }
 
   // ── 3. Log every incoming event ───────────────────────────────────────────
-  console.log("[webhook/whatsapp] Event received", {
+  console.log("[TRACE_A] webhook received", {
+    traceId,
     event,
     rawEvent,
     instance,
@@ -119,7 +121,7 @@ export async function POST(request: NextRequest) {
 
         await Promise.all(
           items.map((data) =>
-            enqueueMessage({ instanceName: instance, data, receivedAt })
+            enqueueMessage({ instanceName: instance, data, receivedAt, traceId })
           )
         );
         break;
@@ -186,6 +188,7 @@ export async function POST(request: NextRequest) {
           instanceName: instance,
           data:         sendData as unknown as EvolutionMessageData,
           receivedAt,
+          traceId,
         });
         break;
       }

@@ -44,6 +44,7 @@ export interface MessageJob {
   instanceName: string;
   data: EvolutionMessageData;
   receivedAt: string; // ISO timestamp — track end-to-end latency
+  traceId?: string;  // Correlates webhook → BullMQ → worker → DB in logs
 }
 
 /** Delivery receipt batch — one per messages.update event. */

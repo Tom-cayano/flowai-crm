@@ -53,7 +53,7 @@ const MESSAGE_TYPE_MAP: Partial<Record<EvolutionMessageType, WppMessageType>> = 
 export async function processMessage(
   job: MessageJob
 ): Promise<MessageJobResult> {
-  const { instanceName, data } = job;
+  const { instanceName, data, traceId } = job;
 
   // ── Guards ───────────────────────────────────────────────────────────────
   if (!data.key) {
@@ -64,6 +64,14 @@ export async function processMessage(
 
   if (!remoteJid) return skip("empty remoteJid");
   if (shouldSkipJid(remoteJid)) return skip(`group/broadcast JID: ${remoteJid}`);
+
+  console.log("[TRACE_C] job processing", {
+    traceId,
+    msgId:    externalId,
+    fromMe,
+    instance: instanceName,
+    jid:      remoteJid,
+  });
 
   const phone = normalizePhone(remoteJid);
 
@@ -124,6 +132,14 @@ export async function processMessage(
   }
 
   await storeCrmMessage(supabase, crmConv.id, content, msgType, timestamp, externalId ?? `ev-${Date.now()}`, fromMe ?? false);
+
+  console.log("[TRACE_D] message stored", {
+    traceId,
+    msgId:          externalId,
+    conversationId: crmConv.id,
+    contactId:      crmContactId,
+    fromMe,
+  });
 
   // Automations and event bus only fire for inbound contact messages.
   if (!fromMe) {
@@ -472,7 +488,7 @@ async function upsertCrmContact(
     return existing.id;
   }
 
-  const { data: created } = await db
+  const { data: created, error: insertError } = await db
     .from("contacts")
     .insert({
       user_id: userId,
@@ -485,6 +501,20 @@ async function upsertCrmContact(
     })
     .select("id")
     .single();
+
+  if (insertError) {
+    // Unique violation: concurrent job already inserted — re-query the winner
+    if (insertError.code === "23505" || insertError.message.includes("duplicate")) {
+      const { data: winner } = await db
+        .from("contacts")
+        .select("id")
+        .eq("user_id", userId)
+        .or(`phone.eq.${phone},whatsapp.eq.${phone}`)
+        .maybeSingle();
+      return winner?.id ?? null;
+    }
+    console.error("[msg-processor] contacts insert error:", insertError.message);
+  }
 
   return created?.id ?? null;
 }
@@ -557,6 +587,20 @@ async function upsertCrmConversation(
     .single();
 
   if (error) {
+    // Unique violation: concurrent job already created this conversation — re-query the winner
+    if (error.code === "23505" || error.message.includes("duplicate")) {
+      const { data: winner } = await db
+        .from("conversations")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("status", "open")
+        .eq("channel", "whatsapp")
+        .eq("contact_phone", contactPhone)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (winner) return { id: winner.id, isNew: false };
+    }
     console.error("[msg-processor] conversations insert error:", error.message);
     return null;
   }
@@ -575,20 +619,18 @@ async function storeCrmMessage(
 ): Promise<void> {
   const sender: "agent" | "contact" = isMine ? "agent" : "contact";
 
-  if (isMine) {
-    // Check if this external_id was already stored by the CRM's sendMessage action
-    // (race: webhook arrives before the outbound worker sets external_id — then
-    //  the check misses and we store a second row, which is acceptable).
-    const { data: existing } = await db
-      .from("messages")
-      .select("id")
-      .eq("external_id", externalId)
-      .maybeSingle();
+  // Dedup check for ALL messages (not just fromMe) — prevents duplicate rows
+  // on BullMQ retries and concurrent processing of the same external_id.
+  const { data: existing } = await db
+    .from("messages")
+    .select("id")
+    .eq("external_id", externalId)
+    .eq("conversation_id", conversationId)
+    .maybeSingle();
 
-    if (existing) {
-      console.info(`[msg-processor] fromMe dedup — external_id=${externalId} already stored`);
-      return;
-    }
+  if (existing) {
+    console.info(`[msg-processor] dedup — external_id=${externalId} already stored`);
+    return;
   }
 
   const crmType = (["text", "image", "audio", "document"].includes(type) ? type : "document") as
@@ -606,11 +648,19 @@ async function storeCrmMessage(
     });
 
   if (error) {
-    if (!error.message.includes("duplicate")) {
-      console.error("[msg-processor] messages insert error:", error.message);
+    // Duplicate: another concurrent path already stored this — safe to skip.
+    if (error.code === "23505" || error.message.includes("duplicate")) {
+      console.info(`[msg-processor] dedup (DB constraint) — external_id=${externalId}`);
+      return; // Skip conversation update — already done by the first writer
     }
-    // Don't return — always update conversation preview so the inbox stays in
-    // sync even when the message row itself fails (e.g. transient DB error).
+    // Real error: throw so BullMQ retries the job instead of silently losing the message.
+    console.error("[msg-processor] messages insert FAILED — will retry", {
+      externalId,
+      conversationId,
+      error: error.message,
+      code:  error.code,
+    });
+    throw new Error(`[storeCrmMessage] insert failed: ${error.message}`);
   }
 
   const now = new Date().toISOString();

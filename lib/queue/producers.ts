@@ -47,12 +47,19 @@ import type {
 } from "./types";
 
 export async function enqueueMessage(job: MessageJob): Promise<string> {
-  const q = getMessageQueue();
+  const q      = getMessageQueue();
+  const jobId  = `msg-${job.data.key?.id ?? Date.now()}`;
   const result = await q.add("process", job, {
     ...BASE_JOB_OPTIONS,
     ...RETRY_OPTIONS,
-    // Deduplicate: same WhatsApp message ID shouldn't be processed twice
-    jobId: `msg-${job.data.key?.id ?? Date.now()}`,
+    jobId,
+  });
+  console.log("[TRACE_B] job enqueued", {
+    traceId:  job.traceId,
+    jobId:    result.id,
+    msgId:    job.data.key?.id,
+    fromMe:   job.data.key?.fromMe,
+    instance: job.instanceName,
   });
   return result.id ?? "";
 }

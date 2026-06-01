@@ -235,17 +235,20 @@ export async function disconnectInstance(instanceId: string): Promise<Result<voi
     return { data: null, error: err instanceof Error ? err.message : String(err) };
   }
 
-  // New client uses logoutInstance (not logout)
+  // Best-effort logout — if Evolution API is unreachable or Baileys is zombie
+  // (HTTP 000 / timeout / 500) we still force-disconnect locally so the UI
+  // never gets stuck showing "Conectado" on a dead session.
   const result = await evoClient.logoutInstance(instance.instance_name);
 
   if (!result.ok) {
-    return {
-      data: null,
-      error: extractEvoError(result.data, result.status),
-    };
+    console.warn(
+      "[disconnectInstance] Evolution logout failed — forcing local disconnect",
+      { instanceName: instance.instance_name, status: result.status }
+    );
+    // Fall through: update DB regardless
   }
 
-  // Update local state — webhook will update connection_state when Evolution fires
+  // Update local state
   await supabase
     .from("whatsapp_instances")
     .update({ connection_state: "close" })

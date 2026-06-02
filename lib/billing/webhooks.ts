@@ -21,15 +21,15 @@ const log = createLogger("billing:webhooks");
 
 function resolvePlanId(priceId: string): string {
   const map: Record<string, string> = {
-    [process.env.STRIPE_PRICE_STARTER_MONTHLY       ?? "price_starter_m"]:       "starter",
+    [process.env.STRIPE_STARTER_MONTHLY_PRICE_ID    ?? "price_starter_m"]:       "starter",
     [process.env.STRIPE_PRICE_STARTER_PROMO_MONTHLY ?? "price_starter_promo_m"]: "starter",
-    [process.env.STRIPE_PRICE_STARTER_YEARLY        ?? "price_starter_y"]:       "starter",
-    [process.env.STRIPE_PRICE_PRO_MONTHLY           ?? "price_pro_m"]:           "pro",
+    [process.env.STRIPE_STARTER_YEARLY_PRICE_ID     ?? "price_starter_y"]:       "starter",
+    [process.env.STRIPE_PRO_MONTHLY_PRICE_ID        ?? "price_pro_m"]:           "pro",
     [process.env.STRIPE_PRICE_PRO_PROMO_MONTHLY     ?? "price_pro_promo_m"]:      "pro",
-    [process.env.STRIPE_PRICE_PRO_YEARLY            ?? "price_pro_y"]:           "pro",
-    [process.env.STRIPE_PRICE_AGENCY_MONTHLY        ?? "price_agency_m"]:        "agency",
+    [process.env.STRIPE_PRO_YEARLY_PRICE_ID         ?? "price_pro_y"]:           "pro",
+    [process.env.STRIPE_AGENCY_MONTHLY_PRICE_ID     ?? "price_agency_m"]:        "agency",
     [process.env.STRIPE_PRICE_AGENCY_PROMO_MONTHLY  ?? "price_agency_promo_m"]:   "agency",
-    [process.env.STRIPE_PRICE_AGENCY_YEARLY         ?? "price_agency_y"]:        "agency",
+    [process.env.STRIPE_AGENCY_YEARLY_PRICE_ID      ?? "price_agency_y"]:        "agency",
   };
   return map[priceId] ?? "starter";
 }

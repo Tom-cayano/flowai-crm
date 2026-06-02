@@ -28,7 +28,7 @@ export function UsageMeter({ workspaceId }: UsageMeterProps) {
     );
   }
 
-  if (!status) return null;
+  if (!status || !status.limits || "error" in status) return null;
 
   const meters = [
     { key: "messages",    label: "Mensajes enviados",      limit: status.limits.messages    },

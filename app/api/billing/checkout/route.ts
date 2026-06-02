@@ -26,8 +26,8 @@ export async function POST(req: NextRequest) {
   if (!plan) return NextResponse.json({ error: "Invalid plan" }, { status: 400 });
 
   const priceId = interval === "yearly"
-    ? process.env[`STRIPE_PRICE_${planId.toUpperCase()}_YEARLY`]
-    : process.env[`STRIPE_PRICE_${planId.toUpperCase()}_MONTHLY`];
+    ? process.env[`STRIPE_${planId.toUpperCase()}_YEARLY_PRICE_ID`]
+    : process.env[`STRIPE_${planId.toUpperCase()}_MONTHLY_PRICE_ID`];
 
   if (!priceId) {
     return NextResponse.json({ error: "Price not configured for this plan" }, { status: 400 });

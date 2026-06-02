@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { motion } from "framer-motion";
 import { Check, Minus, ShieldCheck, CreditCard, Globe, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { FadeUp, StaggerGrid, StaggerItem } from "./motion-section";
+import { FadeUp } from "./motion-section";
 import { cn } from "@/lib/utils";
 
 // ─── Plan data ──────────────────────────────────────────────────────────────
@@ -20,26 +21,27 @@ interface Plan {
   cta: string;
   ctaHref: string;
   badge?: string;
-  tier: "free" | "pro" | "business" | "enterprise";
+  tier: "starter" | "pro" | "agency" | "enterprise";
   features: string[];
   unavailable?: string[];
 }
 
 const plans: Plan[] = [
   {
-    name: "Gratis",
+    name: "Starter",
     tagline: "Para empezar hoy",
-    monthlyPrice: "0€",
-    annualPrice: "0€",
+    monthlyPrice: "19€",
+    annualPrice: "15€",
+    annualTotal: "180€/año",
     period: "/mes",
-    description: "Prueba FlowAI sin coste. Sin tarjeta de crédito.",
-    cta: "Crear cuenta gratis",
+    description: "Todo lo esencial para gestionar tus conversaciones de WhatsApp.",
+    cta: "Empezar gratis",
     ctaHref: "/signup",
-    tier: "free",
+    tier: "starter",
     features: [
       "1 número de WhatsApp",
-      "1 agente incluido",
-      "300 conversaciones / mes",
+      "3 agentes incluidos",
+      "1.000 conversaciones / mes",
       "Bandeja compartida",
       "Automatizaciones básicas",
       "Soporte por email",
@@ -49,9 +51,9 @@ const plans: Plan[] = [
   {
     name: "Pro",
     tagline: "El más elegido",
-    monthlyPrice: "29€",
-    annualPrice: "23€",
-    annualTotal: "276€/año",
+    monthlyPrice: "59€",
+    annualPrice: "47€",
+    annualTotal: "564€/año",
     period: "/mes",
     description: "Todo lo que necesitas para vender más con WhatsApp.",
     cta: "Empezar 14 días gratis",
@@ -71,25 +73,25 @@ const plans: Plan[] = [
     ],
   },
   {
-    name: "Business",
-    tagline: "Para equipos en crecimiento",
-    monthlyPrice: "79€",
-    annualPrice: "63€",
-    annualTotal: "756€/año",
+    name: "Agency",
+    tagline: "Para agencias y equipos",
+    monthlyPrice: "149€",
+    annualPrice: "119€",
+    annualTotal: "1.428€/año",
     period: "/mes",
-    description: "Colaboración avanzada, IA premium y control total.",
+    description: "Multi-workspace, white-label y control total para agencias.",
     cta: "Empezar 14 días gratis",
     ctaHref: "/signup",
-    badge: "Para equipos",
-    tier: "business",
+    badge: "Para agencias",
+    tier: "agency",
     features: [
       "Todo lo del plan Pro",
-      "Multi equipo",
+      "Multi-workspace",
+      "White-label completo",
       "Roles y permisos avanzados",
       "API y webhooks",
+      "Sub-cuentas de clientes",
       "Dashboards avanzados",
-      "Automatizaciones IA premium",
-      "Acceso anticipado a funciones",
       "Soporte prioritario 24/7",
     ],
   },
@@ -104,7 +106,7 @@ const plans: Plan[] = [
     ctaHref: "#contact",
     tier: "enterprise",
     features: [
-      "Todo lo del plan Business",
+      "Todo lo del plan Agency",
       "Infraestructura dedicada",
       "SLA garantizado",
       "SSO / SAML",
@@ -119,9 +121,9 @@ const plans: Plan[] = [
 
 const trust = [
   { icon: ShieldCheck, label: "Sin tarjeta de crédito" },
-  { icon: Zap, label: "14 días gratis en Pro y Business" },
-  { icon: Globe, label: "Datos en servidores de la UE" },
-  { icon: CreditCard, label: "Cancela cuando quieras" },
+  { icon: Zap,         label: "14 días gratis en Pro y Agency" },
+  { icon: Globe,       label: "Datos en servidores de la UE" },
+  { icon: CreditCard,  label: "Cancela cuando quieras" },
 ];
 
 // ─── Helper ──────────────────────────────────────────────────────────────────
@@ -133,7 +135,7 @@ function CheckIcon({ tier }: { tier: Plan["tier"] }) {
         "h-3.5 w-3.5 mt-0.5 shrink-0",
         tier === "pro"
           ? "text-[#10b981]"
-          : tier === "business"
+          : tier === "agency"
           ? "text-[#06b6d4]"
           : "text-zinc-500"
       )}
@@ -208,21 +210,32 @@ export function Pricing() {
         </FadeUp>
 
         {/* ── Cards ── */}
-        <StaggerGrid className="grid sm:grid-cols-2 xl:grid-cols-4 gap-3 items-start">
-          {plans.map((plan) => {
-            const isPro = plan.tier === "pro";
-            const isBusiness = plan.tier === "business";
+        {/*
+          Use motion.div with `animate` (not `whileInView`) so cards are always
+          visible on mount. `whileInView` has a known race condition on page-top
+          content: the IntersectionObserver fires before framer-motion attaches,
+          causing the "enter" event to be missed and cards to stay at opacity:0.
+        */}
+        <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-3 items-start">
+          {plans.map((plan, i) => {
+            const isPro      = plan.tier === "pro";
+            const isAgency   = plan.tier === "agency";
             const isEnterprise = plan.tier === "enterprise";
-            const price = annual ? plan.annualPrice : plan.monthlyPrice;
+            const price      = annual ? plan.annualPrice : plan.monthlyPrice;
 
             return (
-              <StaggerItem key={plan.name}>
+              <motion.div
+                key={plan.name}
+                initial={{ opacity: 0, y: 18 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.45, delay: i * 0.07, ease: [0.21, 1.02, 0.73, 0.98] }}
+              >
                 <div
                   className={cn(
                     "relative flex flex-col rounded-2xl border transition-all duration-300 overflow-hidden",
                     isPro
                       ? "border-[#10b981]/35 bg-gradient-to-b from-[#0d1f16] via-[#0b1a12] to-[#09090b] shadow-[0_0_80px_-16px_rgba(16,185,129,0.22)] hover:shadow-[0_0_100px_-12px_rgba(16,185,129,0.28)] hover:border-[#10b981]/50"
-                      : isBusiness
+                      : isAgency
                       ? "border-[#06b6d4]/20 bg-gradient-to-b from-[#0b191f] to-[#09090b] hover:border-[#06b6d4]/35 hover:bg-[#0d1e26]/80"
                       : isEnterprise
                       ? "border-white/[0.08] bg-[#0f0f12] hover:border-white/[0.14] hover:bg-[#111117]"
@@ -233,7 +246,7 @@ export function Pricing() {
                   {isPro && (
                     <div className="h-0.5 w-full bg-gradient-to-r from-[#10b981] to-[#06b6d4]" />
                   )}
-                  {isBusiness && (
+                  {isAgency && (
                     <div className="h-0.5 w-full bg-gradient-to-r from-[#06b6d4]/60 to-[#8b5cf6]/60" />
                   )}
 
@@ -295,7 +308,7 @@ export function Pricing() {
                           Facturado como {plan.annualTotal} · ahorras un 20%
                         </p>
                       )}
-                      {!annual && plan.tier !== "free" && plan.tier !== "enterprise" && (
+                      {!annual && plan.tier !== "starter" && plan.tier !== "enterprise" && (
                         <p className="text-[11px] mt-1.5 text-zinc-600">
                           O{" "}
                           <button
@@ -319,7 +332,7 @@ export function Pricing() {
                         "w-full mb-6 font-semibold text-[13px] h-10 transition-all duration-200",
                         isPro
                           ? "bg-[#10b981] text-[#030712] hover:bg-[#0ea572] shadow-lg shadow-[#10b981]/20 hover:shadow-[#10b981]/30 hover:scale-[1.02]"
-                          : isBusiness
+                          : isAgency
                           ? "bg-[#06b6d4]/10 border border-[#06b6d4]/30 text-[#06b6d4] hover:bg-[#06b6d4]/20 hover:border-[#06b6d4]/50"
                           : isEnterprise
                           ? "bg-white/[0.07] border border-white/[0.12] text-zinc-200 hover:bg-white/[0.11] hover:text-white"
@@ -336,7 +349,7 @@ export function Pricing() {
                         "h-px mb-6",
                         isPro
                           ? "bg-gradient-to-r from-transparent via-[#10b981]/20 to-transparent"
-                          : isBusiness
+                          : isAgency
                           ? "bg-gradient-to-r from-transparent via-[#06b6d4]/15 to-transparent"
                           : "bg-white/[0.06]"
                       )}
@@ -359,10 +372,10 @@ export function Pricing() {
                     </ul>
                   </div>
                 </div>
-              </StaggerItem>
+              </motion.div>
             );
           })}
-        </StaggerGrid>
+        </div>
 
         {/* ── Trust badges ── */}
         <FadeUp delay={0.15} className="mt-10">

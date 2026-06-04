@@ -6,8 +6,10 @@ import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import type { Plan, BillingInterval } from "@/types/billing";
+import type { Plan, BillingInterval, PlanId } from "@/types/billing";
 import { formatPlanPrice } from "@/lib/billing/plans";
+
+const PLAN_ORDER: PlanId[] = ["starter", "pro", "agency", "enterprise"];
 
 interface PlanCardProps {
   plan:            Plan;
@@ -56,21 +58,36 @@ export function PlanCard({
   onUpgrade,
 }: PlanCardProps) {
   const [loading, setLoading] = useState(false);
+  const [error, setError]     = useState<string | null>(null);
+
   const isCurrent    = plan.id === currentPlanId;
-  const isDowngrade  = false; // simplified — use plan order for real downgrade detection
   const isEnterprise = plan.id === "enterprise";
+  const isDowngrade  =
+    PLAN_ORDER.indexOf(plan.id as PlanId) < PLAN_ORDER.indexOf(currentPlanId as PlanId);
 
   const handleSelect = async () => {
-    if (isCurrent || isEnterprise) return;
+    if (isCurrent) return;
+
+    if (isEnterprise) {
+      window.location.href = "mailto:mentedelfuturo1.0@gmail.com";
+      return;
+    }
+
     setLoading(true);
+    setError(null);
     try {
-      const res = await fetch("/api/billing/checkout", {
+      const res  = await fetch("/api/billing/checkout", {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
         body:    JSON.stringify({ planId: plan.id, interval, workspaceId }),
       });
-      const { url } = await res.json() as { url?: string };
-      if (url) window.location.href = url;
+      const data = await res.json() as { url?: string; error?: string };
+      if (!res.ok || !data.url) {
+        throw new Error(data.error ?? "No se pudo iniciar el proceso de pago");
+      }
+      window.location.href = data.url;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error inesperado");
     } finally {
       setLoading(false);
       onUpgrade?.(plan.id);
@@ -178,6 +195,10 @@ export function PlanCard({
           "Seleccionar plan"
         )}
       </Button>
+
+      {error && (
+        <p className="text-[11px] text-red-400 text-center mt-2">{error}</p>
+      )}
     </motion.div>
   );
 }

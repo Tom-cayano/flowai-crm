@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { Menu, X } from "lucide-react";
 import { LogoFull } from "@/components/ui/logo";
@@ -12,11 +13,13 @@ import { cn } from "@/lib/utils";
 
 const navLinks = [
   { href: "#features",     label: "Funcionalidades" },
-  { href: "#pricing",      label: "Precios"          },
+  { href: "/pricing",      label: "Precios"          },
   { href: "#testimonials", label: "Clientes"         },
 ];
 
-const SECTION_IDS = navLinks.map((l) => l.href.replace("#", ""));
+const SECTION_IDS = navLinks
+  .filter((l) => l.href.startsWith("#"))
+  .map((l) => l.href.replace("#", ""));
 
 // ── Active section hook ────────────────────────────────────────────────────
 // IntersectionObserver with a -20%/-55% root margin so the section
@@ -53,6 +56,7 @@ export function MarketingNavbar() {
   const [open, setOpen]       = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const activeSection           = useActiveSection();
+  const pathname                = usePathname();
 
   useEffect(() => {
     const handler = () => setScrolled(window.scrollY > 16);
@@ -95,19 +99,16 @@ export function MarketingNavbar() {
           {/* Desktop nav */}
           <nav className="hidden md:flex items-center gap-7">
             {navLinks.map((link) => {
-              const id       = link.href.replace("#", "");
-              const isActive = activeSection === id;
-              return (
-                <a
-                  key={link.href}
-                  href={link.href}
-                  className={cn(
-                    "relative text-sm pb-px leading-none transition-colors duration-150",
-                    isActive
-                      ? "text-zinc-100"
-                      : "text-zinc-400 hover:text-zinc-100"
-                  )}
-                >
+              const isHash   = link.href.startsWith("#");
+              const isActive = isHash
+                ? activeSection === link.href.replace("#", "")
+                : pathname === link.href;
+              const cls = cn(
+                "relative text-sm pb-px leading-none transition-colors duration-150",
+                isActive ? "text-zinc-100" : "text-zinc-400 hover:text-zinc-100"
+              );
+              const inner = (
+                <>
                   {link.label}
                   {isActive && (
                     <motion.span
@@ -117,7 +118,16 @@ export function MarketingNavbar() {
                       transition={{ type: "spring", stiffness: 400, damping: 32 }}
                     />
                   )}
+                </>
+              );
+              return isHash ? (
+                <a key={link.href} href={link.href} className={cls}>
+                  {inner}
                 </a>
+              ) : (
+                <Link key={link.href} href={link.href} className={cls}>
+                  {inner}
+                </Link>
               );
             })}
           </nav>
@@ -209,25 +219,32 @@ export function MarketingNavbar() {
           >
             <nav className="px-4 py-3 space-y-0.5">
               {navLinks.map((link) => {
-                const id       = link.href.replace("#", "");
-                const isActive = activeSection === id;
-                return (
-                  <a
-                    key={link.href}
-                    href={link.href}
-                    onClick={() => setOpen(false)}
-                    className={cn(
-                      "flex items-center gap-2 px-3 py-2.5 text-sm rounded-lg transition-colors",
-                      isActive
-                        ? "text-zinc-100 bg-white/[0.06]"
-                        : "text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.04]"
-                    )}
-                  >
+                const isHash   = link.href.startsWith("#");
+                const isActive = isHash
+                  ? activeSection === link.href.replace("#", "")
+                  : pathname === link.href;
+                const cls = cn(
+                  "flex items-center gap-2 px-3 py-2.5 text-sm rounded-lg transition-colors",
+                  isActive
+                    ? "text-zinc-100 bg-white/[0.06]"
+                    : "text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.04]"
+                );
+                const inner = (
+                  <>
                     {isActive && (
                       <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shrink-0" />
                     )}
                     {link.label}
+                  </>
+                );
+                return isHash ? (
+                  <a key={link.href} href={link.href} onClick={() => setOpen(false)} className={cls}>
+                    {inner}
                   </a>
+                ) : (
+                  <Link key={link.href} href={link.href} onClick={() => setOpen(false)} className={cls}>
+                    {inner}
+                  </Link>
                 );
               })}
             </nav>

@@ -30,7 +30,10 @@ export async function POST(req: NextRequest) {
     : process.env[`STRIPE_${planId.toUpperCase()}_MONTHLY_PRICE_ID`];
 
   if (!priceId) {
-    return NextResponse.json({ error: "Price not configured for this plan" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Este plan no tiene precio configurado. Contacta con soporte." },
+      { status: 400 }
+    );
   }
 
   const db = createAdminClient();

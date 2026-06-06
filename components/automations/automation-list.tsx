@@ -159,7 +159,7 @@ function AutomationCard({ automation, onToggle, onDelete, onDuplicate }: Automat
               <div>
                 <p className="text-[10px] text-muted-foreground">Ejecuciones</p>
                 <p className="text-xs font-semibold text-foreground tabular-nums">
-                  {automation.executionCount.toLocaleString("es-ES")}
+                  {(automation.executionCount ?? 0).toLocaleString("es-ES")}
                 </p>
               </div>
               <div>
@@ -285,7 +285,7 @@ export function AutomationList({ initialAutomations }: Props) {
   };
 
   const activeCount = automations.filter((a) => a.status === "active").length;
-  const totalExecutions = automations.reduce((sum, a) => sum + a.executionCount, 0);
+  const totalExecutions = automations.reduce((sum, a) => sum + (a.executionCount ?? 0), 0);
 
   return (
     <>

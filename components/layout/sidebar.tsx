@@ -40,14 +40,13 @@ function MessengerIcon({ className, style }: { className?: string; style?: React
 }
 import { cn, getInitials } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
 import { LogoMark, Logo } from "@/components/ui/logo";
 import { SignOutButton } from "@/components/auth/sign-out-button";
 import type { SessionUser, WorkspaceBranding } from "@/types";
 
 const navItems = [
   { href: "/dashboard",    label: "Panel",            icon: LayoutDashboard },
-  { href: "/conversations",label: "Conversaciones",   icon: MessageSquare, badge: 4 },
+  { href: "/conversations",label: "Conversaciones",   icon: MessageSquare },
   { href: "/contacts",     label: "Contactos",        icon: Users },
   { href: "/whatsapp",     label: "WhatsApp",         icon: Smartphone },
   { href: "/instagram",   label: "Instagram",        icon: InstagramIcon },
@@ -204,21 +203,6 @@ export function Sidebar({ collapsed, onToggle, user, workspace }: SidebarProps) 
               />
               {!collapsed && (
                 <span className="flex-1 truncate leading-none">{item.label}</span>
-              )}
-              {!collapsed && item.badge && (
-                <Badge
-                  variant="default"
-                  className="h-4 min-w-[18px] px-1 text-[9px] font-bold text-[#030712]"
-                  style={{ backgroundColor: "var(--brand)" }}
-                >
-                  {item.badge}
-                </Badge>
-              )}
-              {collapsed && item.badge && (
-                <span
-                  className="absolute top-1.5 right-1.5 h-1.5 w-1.5 rounded-full"
-                  style={{ backgroundColor: "var(--brand)" }}
-                />
               )}
             </Link>
           );

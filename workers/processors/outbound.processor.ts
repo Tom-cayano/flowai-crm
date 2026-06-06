@@ -61,8 +61,19 @@ export async function processOutbound(job: OutboundJob): Promise<OutboundJobResu
   });
 
   if (!result.ok) {
-    console.error(`[outbound] Send failed — instance="${instanceName}" phone=${phone}:`, result.error);
-    throw new Error(result.error ?? "Evolution API send failed");
+    // Log structured error with full context so failures are diagnosable
+    console.error(JSON.stringify({
+      level:       "ERROR",
+      event:       "outbound_send_failed",
+      instance:    instanceName,
+      phone,
+      origin:      job.origin,
+      error:       result.error,
+      serverUrl:   serverUrl.replace(/\/\/[^@]+@/, "//*@"),   // redact credentials
+      key_preview: (job.apiKey ?? "").slice(0, 8) + "…",
+      ts:          new Date().toISOString(),
+    }));
+    throw new Error(`Evolution API send failed (${result.error ?? "unknown"}) — instance="${instanceName}" phone=${phone}`);
   }
 
   // ── Post-send ─────────────────────────────────────────────────────────────

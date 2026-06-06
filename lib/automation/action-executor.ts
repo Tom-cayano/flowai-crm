@@ -39,45 +39,52 @@ export async function executeAction(
       case "send_message": {
         const content = interpolate(action.content, ctx);
 
-        if (ctx.instanceName.startsWith("wac:")) {
-          // WhatsApp Cloud API direct
-          const accountId = ctx.wacAccountId ?? ctx.instanceName.slice(4);
-          await enqueueWACOutbound({
-            accountId,
-            userId:         ctx.userId,
-            to:             ctx.phone.replace(/^\+/, ""),  // WAC expects E.164 without +
-            content,
-            conversationId: ctx.conversationId ?? "",
-            origin:         "automation",
-          });
-        } else if (ctx.instanceName.startsWith("fbm:")) {
-          // Facebook Messenger
-          const pageId = ctx.fbmPageId ?? ctx.instanceName.slice(4);
-          await enqueueFBOutbound({
-            pageId,
-            userId:         ctx.userId,
-            recipientPsid:  ctx.phone,  // phone holds PSID for Messenger conversations
-            content,
-            conversationId: ctx.conversationId ?? "",
-            origin:         "automation",
-          });
-        } else {
-          // WhatsApp via Evolution API (default)
-          await enqueueOutbound({
-            instanceName:   ctx.instanceName,
-            serverUrl:      ctx.serverUrl,
-            apiKey:         ctx.instanceApiKey,
-            phone:          ctx.phone,
-            content,
-            type:           "text",
-            conversationId: ctx.conversationId ?? "",
-            userId:         ctx.userId,
-            origin:         "automation",
-            agentName:      "FlowAI",
-          });
+        try {
+          if (ctx.instanceName.startsWith("wac:")) {
+            const accountId = ctx.wacAccountId ?? ctx.instanceName.slice(4);
+            await enqueueWACOutbound({
+              accountId,
+              userId:         ctx.userId,
+              to:             ctx.phone.replace(/^\+/, ""),
+              content,
+              conversationId: ctx.conversationId ?? "",
+              origin:         "automation",
+            });
+          } else if (ctx.instanceName.startsWith("fbm:")) {
+            const pageId = ctx.fbmPageId ?? ctx.instanceName.slice(4);
+            await enqueueFBOutbound({
+              pageId,
+              userId:         ctx.userId,
+              recipientPsid:  ctx.phone,
+              content,
+              conversationId: ctx.conversationId ?? "",
+              origin:         "automation",
+            });
+          } else {
+            await enqueueOutbound({
+              instanceName:   ctx.instanceName,
+              serverUrl:      ctx.serverUrl,
+              apiKey:         ctx.instanceApiKey,
+              phone:          ctx.phone,
+              content,
+              type:           "text",
+              conversationId: ctx.conversationId ?? "",
+              userId:         ctx.userId,
+              origin:         "automation",
+              agentName:      "FlowAI",
+            });
+          }
+        } catch (queueErr) {
+          // Queue unavailable — this is a hard failure, not a soft retry
+          const errMsg = queueErr instanceof Error ? queueErr.message : String(queueErr);
+          await log("error", `send_message falló: cola no disponible — ${errMsg}`);
+          return { ok: false, error: `Queue unavailable: ${errMsg}` };
         }
 
-        await log("info", `Mensaje enviado: "${content.slice(0, 60)}…"`);
+        // NOTE: "encolado" means the job was added to Redis. Actual Evolution API
+        // delivery is confirmed asynchronously by outbound.processor.ts. Check
+        // [outbound] logs for the real HTTP result and any delivery errors.
+        await log("info", `send_message encolado — phone=${ctx.phone} instance=${ctx.instanceName} content="${content.slice(0, 60)}"`);
         return { ok: true };
       }
 

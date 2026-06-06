@@ -15,7 +15,7 @@ export function FadeUp({ children, className, delay = 0 }: MotionProps) {
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true, margin: "-60px" }}
+      viewport={{ once: true, margin: "-60px", amount: 0 }}
       transition={{ duration: 0.55, delay, ease: easing }}
       className={className}
     >
@@ -29,7 +29,7 @@ export function FadeIn({ children, className, delay = 0 }: MotionProps) {
     <motion.div
       initial={{ opacity: 0 }}
       whileInView={{ opacity: 1 }}
-      viewport={{ once: true, margin: "-60px" }}
+      viewport={{ once: true, margin: "-60px", amount: 0 }}
       transition={{ duration: 0.5, delay }}
       className={className}
     >
@@ -49,7 +49,7 @@ export function StaggerGrid({ children, className, staggerDelay = 0.07 }: Stagge
     <motion.div
       initial="hidden"
       whileInView="visible"
-      viewport={{ once: true, margin: "-60px" }}
+      viewport={{ once: true, margin: "-60px", amount: 0 }}
       variants={{
         hidden: {},
         visible: { transition: { staggerChildren: staggerDelay } },

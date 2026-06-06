@@ -91,21 +91,29 @@ const ACTION_LABELS: Record<ActionType, string> = {
 function describeAction(data: ActionNodeData): string {
   const a = data.action;
   switch (a.type) {
-    case "send_message":      return a.content.slice(0, 50) + (a.content.length > 50 ? "…" : "");
+    case "send_message":
+    case "send_instagram_dm":
+    case "send_messenger_message":
+    case "reply_instagram_comment": {
+      const text = a.content ?? "";
+      return text ? text.slice(0, 50) + (text.length > 50 ? "…" : "") : "(mensaje vacío)";
+    }
     case "assign_agent":      return a.agentName ?? "Round-robin";
     case "add_tag":
-    case "remove_tag":        return `#${a.tag}`;
-    case "update_status":     return a.status;
-    case "wait_delay":        return formatDelay(a.durationMs);
-    case "update_lead_score": return `${a.delta > 0 ? "+" : ""}${a.delta} pts`;
-    case "send_webhook":      return a.url.replace(/^https?:\/\//, "");
-    default:                  return data.label;
+    case "add_instagram_tag":
+    case "remove_tag":        return a.tag ? `#${a.tag}` : "(sin etiqueta)";
+    case "update_status":     return a.status ?? "";
+    case "wait_delay":        return a.durationMs != null ? formatDelay(a.durationMs) : "0s";
+    case "update_lead_score": return a.delta != null ? `${a.delta > 0 ? "+" : ""}${a.delta} pts` : "+0 pts";
+    case "send_webhook":      return a.url ? a.url.replace(/^https?:\/\//, "") : "(sin URL)";
+    default:                  return data.label ?? "";
   }
 }
 
 function formatDelay(ms: number): string {
-  if (ms < 60_000)    return `${Math.round(ms / 1000)}s`;
-  if (ms < 3_600_000) return `${Math.round(ms / 60_000)}min`;
+  if (!ms || ms <= 0)  return "0s";
+  if (ms < 60_000)     return `${Math.round(ms / 1000)}s`;
+  if (ms < 3_600_000)  return `${Math.round(ms / 60_000)}min`;
   return `${Math.round(ms / 3_600_000)}h`;
 }
 

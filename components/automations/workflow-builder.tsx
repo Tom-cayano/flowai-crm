@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import {
   ReactFlow,
   Background,
@@ -41,8 +41,8 @@ const NODE_TYPES = {
 };
 
 const EDGE_DEFAULTS = {
-  style:      { stroke: "hsl(var(--border))", strokeWidth: 1.5 },
-  markerEnd:  { type: MarkerType.ArrowClosed, color: "hsl(var(--border))", width: 14, height: 14 },
+  style:      { stroke: "#94a3b8", strokeWidth: 1.5 },
+  markerEnd:  { type: MarkerType.ArrowClosed, color: "#94a3b8", width: 14, height: 14 },
   animated:   false,
 };
 
@@ -149,6 +149,12 @@ function Builder({ automationId, initialWorkflow }: Props) {
     }))
   );
 
+  // Refs so change-handlers always read the latest state without stale closures
+  const nodesRef = useRef(nodes);
+  const edgesRef = useRef(edges);
+  useEffect(() => { nodesRef.current = nodes; }, [nodes]);
+  useEffect(() => { edgesRef.current = edges; }, [edges]);
+
   // ── Selected node for config panel ────────────────────────────────────────
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
@@ -196,18 +202,17 @@ function Builder({ automationId, initialWorkflow }: Props) {
   const handleNodesChange: typeof onNodesChange = useCallback(
     (changes) => {
       onNodesChange(changes);
-      // Defer read of latest state to avoid stale closure
-      setNodes((nds) => { scheduleSave(nds, edges); return nds; });
+      setNodes((nds) => { scheduleSave(nds, edgesRef.current); return nds; });
     },
-    [onNodesChange, setNodes, edges, scheduleSave]
+    [onNodesChange, setNodes, scheduleSave]
   );
 
   const handleEdgesChange: typeof onEdgesChange = useCallback(
     (changes) => {
       onEdgesChange(changes);
-      setEdges((eds) => { scheduleSave(nodes, eds); return eds; });
+      setEdges((eds) => { scheduleSave(nodesRef.current, eds); return eds; });
     },
-    [onEdgesChange, setEdges, nodes, scheduleSave]
+    [onEdgesChange, setEdges, scheduleSave]
   );
 
   const onNodeClick: NodeMouseHandler = useCallback((_e, node) => {
@@ -249,13 +254,13 @@ function Builder({ automationId, initialWorkflow }: Props) {
 
       setNodes((nds) => {
         const next = [...nds, newNode];
-        scheduleSave(next, edges);
+        scheduleSave(next, edgesRef.current);
         return next;
       });
 
       setSelectedNodeId(id);
     },
-    [screenToFlowPosition, setNodes, edges, scheduleSave]
+    [screenToFlowPosition, setNodes, scheduleSave]
   );
 
   // ── Config panel update ───────────────────────────────────────────────────
@@ -268,11 +273,11 @@ function Builder({ automationId, initialWorkflow }: Props) {
             ? { ...n, data: newData as unknown as Record<string, unknown> }
             : n
         );
-        scheduleSave(next, edges);
+        scheduleSave(next, edgesRef.current);
         return next;
       });
     },
-    [setNodes, edges, scheduleSave]
+    [setNodes, scheduleSave]
   );
 
   // ── Render ────────────────────────────────────────────────────────────────

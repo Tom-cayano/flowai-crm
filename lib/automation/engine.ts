@@ -347,9 +347,15 @@ async function runWorkflow(
         }
 
         if (!result.ok) {
+          // send_message queue failure is fatal — no point continuing without delivery
+          if (data.action.type === "send_message") {
+            await log(currentNode.id, "action", "error",
+              `send_message falló: ${result.error ?? "unknown"} — ejecución marcada como fallida`);
+            await markFailed(db, executionId, result.error ?? "send_message failed");
+            return;
+          }
           await log(currentNode.id, "action", "warn",
             `Acción ${data.action.type} falló (non-fatal): ${result.error ?? "unknown"}`);
-          // Non-fatal — continue to next node
         }
 
         // After dispatching trigger-producing actions, fire side-effect dispatchers

@@ -1,4 +1,6 @@
 #!/usr/bin/env tsx
+import dotenv from "dotenv";
+dotenv.config({ path: ".env.local" });
 // FlowAI CRM — WhatsApp + Automation background worker
 //
 // Starts BullMQ workers for all engine queues and runs periodic background jobs.
@@ -174,60 +176,101 @@ function extractUserId(data: unknown): string | undefined {
 
 // ─── Bootstrap ────────────────────────────────────────────────────────────────
 
+// ─── Startup validation ───────────────────────────────────────────────────────
+// All checks are FATAL: a missing or invalid critical config prevents the worker
+// from starting so failures are visible immediately rather than at job execution.
+
+function fatal(message: string, meta?: Record<string, unknown>): never {
+  log.error(`[FATAL] ${message}`, meta ?? {});
+  process.exit(1);
+}
+
+function validateEnvVars(): void {
+  const required: Record<string, string | undefined> = {
+    REDIS_URL:                 process.env.REDIS_URL,
+    SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
+    EVOLUTION_SERVER_URL:      process.env.EVOLUTION_SERVER_URL,
+    EVOLUTION_API_KEY:         process.env.EVOLUTION_API_KEY,
+  };
+
+  const missing = Object.entries(required)
+    .filter(([, v]) => !v?.trim())
+    .map(([k]) => k);
+
+  if (missing.length > 0) {
+    fatal("Missing required environment variables — worker cannot start", { missing });
+  }
+
+  log.info("Environment variables present", { vars: Object.keys(required).join(", ") });
+}
+
 function validateSupabaseKey(): void {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
-  if (!key) {
-    log.error("SUPABASE_SERVICE_ROLE_KEY is missing — all DB writes will fail");
-    return;
-  }
   try {
     const payload = JSON.parse(Buffer.from(key.split(".")[1] ?? "", "base64url").toString());
     if (payload.role !== "service_role") {
-      log.error(
-        "SUPABASE_SERVICE_ROLE_KEY has wrong role — ALL DB WRITES WILL FAIL DUE TO RLS",
+      fatal(
+        "SUPABASE_SERVICE_ROLE_KEY has wrong JWT role — all DB writes will fail due to RLS",
         {
           jwtRole: payload.role,
-          fix: "Go to https://supabase.com/dashboard/project/bnigdnsfdvvumlfrfwnf/settings/api " +
-               "and copy the 'service_role' key (not the anon key) into this env var",
+          fix: "Copy the service_role key (not the anon key) from Supabase Dashboard → Settings → API",
         }
       );
-    } else {
-      log.info("SUPABASE_SERVICE_ROLE_KEY validated", { role: payload.role });
     }
-  } catch {
-    log.warn("SUPABASE_SERVICE_ROLE_KEY could not be decoded as JWT");
+    log.info("SUPABASE_SERVICE_ROLE_KEY validated", { role: payload.role });
+  } catch (err) {
+    // Key is not a JWT (e.g. Supabase sb_secret_* format) — treat presence as sufficient
+    if (err instanceof SyntaxError || (err instanceof Error && err.message.includes("JSON"))) {
+      log.info("SUPABASE_SERVICE_ROLE_KEY present (non-JWT format — OK for newer Supabase)");
+    } else {
+      fatal("SUPABASE_SERVICE_ROLE_KEY is malformed", { error: String(err) });
+    }
   }
 }
 
 async function validateEvolutionApi(): Promise<void> {
-  const serverUrl = process.env.EVOLUTION_SERVER_URL ?? "";
-  const apiKey    = process.env.EVOLUTION_API_KEY    ?? "";
+  const serverUrl = process.env.EVOLUTION_SERVER_URL!.replace(/\/$/, "");
+  const apiKey    = process.env.EVOLUTION_API_KEY!;
+  const url       = `${serverUrl}/instance/fetchInstances`;
 
-  if (!serverUrl || !apiKey) {
-    log.error("EVOLUTION_SERVER_URL or EVOLUTION_API_KEY missing — outbound sends will fail if whatsapp_instances has no server_url/api_key");
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: { apikey: apiKey },
+      signal: AbortSignal.timeout(8_000),
+    });
+  } catch (err) {
+    fatal("Evolution API unreachable at startup — check EVOLUTION_SERVER_URL", {
+      url,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  if (res.status === 401 || res.status === 403) {
+    fatal(
+      `Evolution API rejected the API key (HTTP ${res.status}) — check EVOLUTION_API_KEY`,
+      { url, status: res.status, key_preview: apiKey.slice(0, 8) + "…" }
+    );
+  }
+
+  if (!res.ok) {
+    // Non-auth errors (503, timeout, etc.) are warnings — Evolution may be warming up
+    log.warn("Evolution API returned non-OK at startup (non-fatal)", { url, status: res.status });
     return;
   }
 
-  try {
-    const url = `${serverUrl.replace(/\/$/, "")}/instance/fetchInstances`;
-    const res = await fetch(url, {
-      headers: { apikey: apiKey },
-      signal: AbortSignal.timeout(5_000),
-    });
-    if (res.ok) {
-      const data = await res.json().catch(() => ({})) as { instance?: unknown }[];
-      log.info("Evolution API reachable", { url, instanceCount: Array.isArray(data) ? data.length : "?" });
-    } else {
-      log.warn("Evolution API returned non-OK at startup", { url, status: res.status });
-    }
-  } catch (err) {
-    log.warn("Evolution API unreachable at startup", { error: err instanceof Error ? err.message : String(err) });
-  }
+  const data = await res.json().catch(() => []) as unknown[];
+  log.info("Evolution API reachable and API key accepted", {
+    url,
+    instanceCount: Array.isArray(data) ? data.length : "?",
+    key_preview: apiKey.slice(0, 8) + "…",
+  });
 }
 
 async function start(): Promise<void> {
-  validateSupabaseKey();
-  await validateEvolutionApi();
+  validateEnvVars();      // FATAL: missing critical env vars
+  validateSupabaseKey();  // FATAL: wrong JWT role or malformed key
+  await validateEvolutionApi(); // FATAL: unreachable or 401
 
   log.info("starting FlowAI engine", {
     workerId: WORKER_ID,

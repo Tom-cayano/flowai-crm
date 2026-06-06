@@ -102,32 +102,46 @@ export async function processMessage(
     ? new Date(data.messageTimestamp * 1_000).toISOString()
     : new Date().toISOString();
 
-  // ── WhatsApp native layer (inbound only) ──────────────────────────────────
-  // Skipped for fromMe=true: data.pushName is the agent's own WhatsApp name —
-  // passing it through would overwrite the contact's stored name.
+  // ── WhatsApp native layer ─────────────────────────────────────────────────
+  // For inbound: upsert contact (safe to use pushName = contact's name).
+  // For outbound (fromMe=true): only look up existing contact to avoid
+  // overwriting the stored contact name with the agent's own WhatsApp name.
+  let wppContactId: string | null = null;
   if (!fromMe) {
-    const contactName  = resolveContactName(data, phone);
-    const wppContactId = await upsertWhatsAppContact(supabase, config, remoteJid, phone, data);
-    const wppChatId    = await upsertWhatsAppChat(supabase, config, remoteJid, contactName, wppContactId, content, timestamp);
+    wppContactId = await upsertWhatsAppContact(supabase, config, remoteJid, phone, data);
+  } else if (config.instanceId) {
+    const { data: existing } = await supabase
+      .from("whatsapp_contacts")
+      .select("id")
+      .eq("instance_id", config.instanceId)
+      .eq("whatsapp_id", remoteJid)
+      .maybeSingle();
+    wppContactId = existing?.id ?? null;
+  }
 
-    if (wppChatId) {
-      const wppMessageId = await insertWhatsAppMessage(
-        supabase, config, wppChatId, data, externalId ?? `ev-${Date.now()}`,
-        remoteJid, content, msgType, timestamp
-      );
+  const nativeContactName = fromMe ? phone : resolveContactName(data, phone);
+  const wppChatId = await upsertWhatsAppChat(
+    supabase, config, remoteJid, nativeContactName, wppContactId, content, timestamp, fromMe ?? false
+  );
 
-      if (wppMessageId && data.messageType && MEDIA_TYPES.has(data.messageType)) {
-        await enqueueMedia({
-          messageId:    wppMessageId,
-          externalId:   externalId ?? "",
-          instanceName,
-          userId:       config.userId,
-          chatId:       wppChatId,
-          mediaType:    msgType as "image" | "audio" | "video" | "document" | "sticker",
-          mimeType:     extractMimeType(data.message),
-          fileName:     extractFileName(data.message),
-        }).catch((err) => console.warn("[msg-processor] enqueueMedia failed:", err));
-      }
+  if (wppChatId) {
+    const wppMessageId = await insertWhatsAppMessage(
+      supabase, config, wppChatId, data, externalId ?? `ev-${Date.now()}`,
+      remoteJid, content, msgType, timestamp, fromMe ?? false
+    );
+
+    // Only enqueue media download for inbound messages (agent already has outbound media).
+    if (wppMessageId && !fromMe && data.messageType && MEDIA_TYPES.has(data.messageType)) {
+      await enqueueMedia({
+        messageId:    wppMessageId,
+        externalId:   externalId ?? "",
+        instanceName,
+        userId:       config.userId,
+        chatId:       wppChatId,
+        mediaType:    msgType as "image" | "audio" | "video" | "document" | "sticker",
+        mimeType:     extractMimeType(data.message),
+        fileName:     extractFileName(data.message),
+      }).catch((err) => console.warn("[msg-processor] enqueueMedia failed:", err));
     }
   }
 
@@ -387,9 +401,12 @@ async function upsertWhatsAppChat(
   name: string,
   contactId: string | null,
   lastPreview: string,
-  lastAt: string
+  lastAt: string,
+  fromMe: boolean = false
 ): Promise<string | null> {
   if (!config.instanceId) return null;
+
+  const sender = fromMe ? "me" : "them";
 
   const { data: existing } = await db
     .from("whatsapp_chats")
@@ -399,14 +416,14 @@ async function upsertWhatsAppChat(
     .maybeSingle();
 
   if (existing) {
-    // First: update the preview and timestamp fields
     await db
       .from("whatsapp_chats")
       .update({
         last_message_at:      lastAt,
         last_message_preview: lastPreview.slice(0, 120),
-        last_message_sender:  "them",
-        unread_count:         (existing.unread_count ?? 0) + 1,
+        last_message_sender:  sender,
+        // Outgoing messages don't increment the unread counter
+        unread_count:         fromMe ? (existing.unread_count ?? 0) : (existing.unread_count ?? 0) + 1,
         updated_at:           new Date().toISOString(),
       })
       .eq("id", existing.id);
@@ -422,10 +439,10 @@ async function upsertWhatsAppChat(
       remote_jid:           remoteJid,
       name,
       is_group:             false,
-      unread_count:         1,
+      unread_count:         fromMe ? 0 : 1,
       last_message_at:      lastAt,
       last_message_preview: lastPreview.slice(0, 120),
-      last_message_sender:  "them",
+      last_message_sender:  sender,
     })
     .select("id")
     .single();
@@ -442,7 +459,8 @@ async function insertWhatsAppMessage(
   remoteJid: string,
   content: string,
   type: WppMessageType,
-  timestamp: string
+  timestamp: string,
+  fromMe: boolean = false
 ): Promise<string | null> {
   // Deduplicate by external_id
   const { data: existing } = await db
@@ -462,11 +480,11 @@ async function insertWhatsAppMessage(
       external_id: externalId,
       remote_jid:  remoteJid,
       push_name:   data.pushName ?? null,
-      from_me:     false,
+      from_me:     fromMe,
       type,
       content,
       raw_content: data.message as unknown as import("@/types/supabase").Json,
-      status:      "received",
+      status:      fromMe ? "sent" : "received",
       timestamp,
     })
     .select("id")

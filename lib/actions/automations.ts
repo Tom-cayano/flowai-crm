@@ -15,14 +15,14 @@ type Result<T> = Ok<T> | Err;
 function extractTriggerType(workflow: WorkflowGraph): string | null {
   const triggerNode = workflow.nodes.find((n) => n.type === "trigger");
   if (!triggerNode || triggerNode.data.nodeType !== "trigger") return null;
-  return triggerNode.data.config.type;
+  return triggerNode.data.config?.type ?? null;
 }
 
 function rowToRecord(row: {
   id: string;
   user_id: string;
   name: string;
-  description: string;
+  description?: string | null;
   status: string;
   workflow: unknown;
   trigger_type: string | null;
@@ -35,11 +35,11 @@ function rowToRecord(row: {
     id:              row.id,
     userId:          row.user_id,
     name:            row.name,
-    description:     row.description,
+    description:     row.description ?? "",
     status:          row.status as AutomationStatus2,
     workflow:        row.workflow as unknown as WorkflowGraph,
-    executionCount:  row.execution_count,
-    lastTriggeredAt: row.last_triggered_at,
+    executionCount:  row.execution_count ?? 0,
+    lastTriggeredAt: row.last_triggered_at ?? null,
     createdAt:       row.created_at,
     updatedAt:       row.updated_at,
   };
@@ -166,15 +166,24 @@ export async function createAutomation(payload: {
     .insert({
       user_id:      user.id,
       name:         payload.name.trim(),
-      description:  payload.description?.trim() ?? "",
       workflow:     workflow as unknown as import("@/types/supabase").Json,
-      trigger_type: extractTriggerType(workflow),
+      trigger_type: extractTriggerType(workflow) ?? "",
       status:       "draft",
     })
     .select()
     .single();
 
   if (error) return { data: null, error: error.message };
+
+  // Persist description separately — column may be absent in older DB schemas.
+  const desc = payload.description?.trim();
+  if (desc) {
+    await supabase
+      .from("automations")
+      .update({ description: desc })
+      .eq("id", data.id);
+  }
+
   revalidatePath("/automations");
   return { data: rowToRecord(data), error: null };
 }
@@ -191,7 +200,7 @@ export async function updateAutomationWorkflow(
     .from("automations")
     .update({
       workflow:     workflow as unknown as import("@/types/supabase").Json,
-      trigger_type: extractTriggerType(workflow),
+      trigger_type: extractTriggerType(workflow) ?? "",
       updated_at:   new Date().toISOString(),
     })
     .eq("id", id)
@@ -230,9 +239,28 @@ export async function toggleAutomationStatus(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: "No autenticado" };
 
+  // When activating, re-sync trigger_type from the current workflow so that
+  // the engine can find the automation even if auto-save set an empty value.
+  let triggerTypeUpdate: string | undefined;
+  if (status === "active") {
+    const { data: current } = await supabase
+      .from("automations")
+      .select("workflow")
+      .eq("id", id)
+      .eq("user_id", user.id)
+      .single();
+    if (current?.workflow) {
+      triggerTypeUpdate = extractTriggerType(current.workflow as unknown as WorkflowGraph) ?? "";
+    }
+  }
+
   const { error } = await supabase
     .from("automations")
-    .update({ status, updated_at: new Date().toISOString() })
+    .update({
+      status,
+      ...(triggerTypeUpdate !== undefined && { trigger_type: triggerTypeUpdate }),
+      updated_at: new Date().toISOString(),
+    })
     .eq("id", id)
     .eq("user_id", user.id);
 
@@ -276,15 +304,24 @@ export async function duplicateAutomation(id: string): Promise<Result<Automation
     .insert({
       user_id:      user.id,
       name:         `${source.name} (copia)`,
-      description:  source.description,
       workflow:     source.workflow,
-      trigger_type: source.trigger_type,
+      trigger_type: source.trigger_type ?? "",
       status:       "draft",
     })
     .select()
     .single();
 
   if (error) return { data: null, error: error.message };
+
+  // Copy description separately — column may be absent in older DB schemas.
+  const desc = (source as { description?: string }).description?.trim();
+  if (desc) {
+    await supabase
+      .from("automations")
+      .update({ description: desc })
+      .eq("id", data.id);
+  }
+
   revalidatePath("/automations");
   return { data: rowToRecord(data), error: null };
 }

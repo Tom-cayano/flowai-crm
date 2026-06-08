@@ -444,6 +444,7 @@ export function verifyWebhookSignature(
     hasSecret: !!appSecret,
     secretLength: appSecret.length,
     secretPrefix: appSecret.slice(0, 4),
+    secretSha256: createHash("sha256").update(appSecret).digest("hex"),
   });
 
   if (!appSecret) {

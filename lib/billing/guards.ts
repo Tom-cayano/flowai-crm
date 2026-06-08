@@ -34,11 +34,9 @@ export async function assertFeature(
   feature: PlanFeature
 ): Promise<void> {
   // Development bypass — PLAN_GATE_BYPASS=true unlocks all features including
-  // the subscription existence check so local testing never requires Stripe.
-  if (
-    process.env.NODE_ENV !== "production" &&
-    process.env.PLAN_GATE_BYPASS === "true"
-  ) {
+  // the subscription existence check. We allow this in production if the admin
+  // explicitly sets it, and we trim() to handle Vercel CLI trailing newlines.
+  if (process.env.PLAN_GATE_BYPASS?.trim() === "true") {
     return;
   }
 
@@ -69,6 +67,10 @@ export async function assertPlan(
   workspaceId: string,
   minPlanId: PlanId
 ): Promise<void> {
+  if (process.env.PLAN_GATE_BYPASS?.trim() === "true") {
+    return;
+  }
+
   const sub = await getWorkspaceSubscription(workspaceId);
   if (!sub) {
     throw new BillingError("NO_SUBSCRIPTION", "No se encontró suscripción activa.");
@@ -92,6 +94,10 @@ export async function assertUsageLimit(
   workspaceId: string,
   resource: "messages" | "ai_credits" | "automations"
 ): Promise<void> {
+  if (process.env.PLAN_GATE_BYPASS?.trim() === "true") {
+    return;
+  }
+
   const ok = await isWithinQuota(workspaceId, resource);
   if (!ok) {
     throw new BillingError(

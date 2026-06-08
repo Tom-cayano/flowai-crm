@@ -78,6 +78,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       : "header-absent",
   });
 
+  // ── Signature headers — log all variants Meta could send ─────────────────
+  const sigHeaders: Record<string, string | null> = {
+    "x-hub-signature-256": req.headers.get("x-hub-signature-256"),
+    "x-hub-signature":     req.headers.get("x-hub-signature"),
+    "x-fb-signature":      req.headers.get("x-fb-signature"),
+    "x-instagram-signature": req.headers.get("x-instagram-signature"),
+  };
+  console.log("[IG SIG HEADERS]", sigHeaders);
+
   // ── Signature verification ────────────────────────────────────────────────
   const signature = req.headers.get("x-hub-signature-256") ?? "";
   if (!verifyWebhookSignature(bodyBuffer, signature)) {

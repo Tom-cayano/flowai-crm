@@ -64,6 +64,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     prefix120: rawBodyText.slice(0, 120),
   });
 
+  console.log("[IG APP CONFIG]", {
+    INSTAGRAM_APP_ID: process.env.INSTAGRAM_APP_ID,
+    META_APP_ID: process.env.META_APP_ID
+  });
+
   // ── Signature verification ────────────────────────────────────────────────
   const signature = req.headers.get("x-hub-signature-256") ?? "";
   if (!verifyWebhookSignature(rawBodyText, signature)) {

@@ -426,12 +426,19 @@ export function verifyWebhookSignature(
   const envSecret = process.env.INSTAGRAM_APP_SECRET || process.env.META_APP_SECRET || "";
   const appSecret = envSecret.trim(); // Prevent \n from invalidating HMAC
 
+  const expected = `sha256=${createHmac("sha256", appSecret)
+    .update(rawBody)
+    .digest("hex")}`;
+
   console.log("[IG SIGNATURE DEBUG]", {
     hasSignature: !!signature,
     signaturePrefix: signature?.slice(0, 20),
     hasSecret: !!appSecret,
     secretLength: appSecret?.length,
-    envSecretLength: envSecret?.length, // To see if trailing newline existed
+    envSecretLength: envSecret?.length,
+    bodyLength: rawBody.length,
+    expectedPrefix: expected.slice(0, 20),
+    receivedPrefix: signature?.slice(0, 20),
   });
 
   if (!appSecret) {
@@ -439,16 +446,13 @@ export function verifyWebhookSignature(
     return false;
   }
 
-  const expected = `sha256=${createHmac("sha256", appSecret)
-    .update(rawBody)
-    .digest("hex")}`;
-
   try {
     return timingSafeEqual(
       Buffer.from(signature),
       Buffer.from(expected),
     );
-  } catch {
+  } catch (err) {
+    console.warn("[ig-client] timingSafeEqual failed (likely length mismatch):", (err as Error).message);
     return false;
   }
 }

@@ -32,7 +32,18 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const verifyToken = process.env.INSTAGRAM_WEBHOOK_VERIFY_TOKEN ?? "";
 
-  if (mode === "subscribe" && token === verifyToken && challenge) {
+  console.log("[IG_WEBHOOK_DEBUG]", {
+    mode,
+    tokenLength: token?.length,
+    verifyTokenLength: verifyToken?.length,
+    tokenPrefix: token?.slice(0, 8),
+    verifyTokenPrefix: verifyToken?.slice(0, 8),
+    equal: token === verifyToken,
+    equalTrimmed: token === verifyToken?.trim(),
+  });
+
+  // We add .trim() directly here as well to fix it proactively if it's the \n issue
+  if (mode === "subscribe" && token === verifyToken?.trim() && challenge) {
     // Respond with the challenge value — Meta confirms the subscription
     return new NextResponse(challenge, { status: 200 });
   }

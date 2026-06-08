@@ -54,14 +54,21 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 // ─── POST — event ingestion ───────────────────────────────────────────────────
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  // Use req.text() to reliably capture the exact string Meta sent.
-  // Next.js req.arrayBuffer() can sometimes cause binary serialization issues in serverless.
-  const rawBodyText = await req.text();
+  // Buffer the body for signature verification (signature is over raw bytes)
+  const rawBody = await req.arrayBuffer();
+  const bodyBuffer = Buffer.from(rawBody);
+
+  console.log("[IG HMAC INPUT]", {
+    constructor: bodyBuffer?.constructor?.name,
+    isBuffer: Buffer.isBuffer(bodyBuffer),
+    byteLength: rawBody.byteLength,
+    bufferLength: bodyBuffer.length
+  });
 
   console.log("[IG BODY HASH]", {
-    type: "string",
-    length: rawBodyText.length,
-    prefix120: rawBodyText.slice(0, 120),
+    type: "ArrayBuffer",
+    length: rawBody.byteLength,
+    prefix120: bodyBuffer.toString("utf8").slice(0, 120),
   });
 
   console.log("[IG APP CONFIG]", {
@@ -71,7 +78,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   // ── Signature verification ────────────────────────────────────────────────
   const signature = req.headers.get("x-hub-signature-256") ?? "";
-  if (!verifyWebhookSignature(rawBodyText, signature)) {
+  if (!verifyWebhookSignature(bodyBuffer, signature)) {
     // Return 200 to prevent Meta from retrying with bad secret — just drop it
     console.warn("[ig-webhook] Signature mismatch — dropping event");
     return NextResponse.json({ received: false }, { status: 200 });
@@ -79,7 +86,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   let payload: MetaWebhookPayload;
   try {
-    payload = JSON.parse(rawBodyText) as MetaWebhookPayload;
+    payload = JSON.parse(bodyBuffer.toString("utf8")) as MetaWebhookPayload;
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }

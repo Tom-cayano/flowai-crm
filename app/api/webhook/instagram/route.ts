@@ -57,25 +57,25 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   // Buffer the body for signature verification (signature is over raw bytes)
-  const rawBody = await req.arrayBuffer();
-  const bodyBuffer = Buffer.from(rawBody);
+  const rawBody    = await req.arrayBuffer();                  // L1: network → ArrayBuffer
+  const hashL1     = createHash("sha256").update(Buffer.from(rawBody)).digest("hex");
 
-  console.log("[IG HMAC INPUT]", {
-    constructor: bodyBuffer?.constructor?.name,
-    isBuffer: Buffer.isBuffer(bodyBuffer),
-    byteLength: rawBody.byteLength,
-    bufferLength: bodyBuffer.length
-  });
+  const bodyBuffer = Buffer.from(rawBody);                     // L2: ArrayBuffer → Buffer
+  const hashL2     = createHash("sha256").update(bodyBuffer).digest("hex");
 
-  console.log("[IG BODY HASH]", {
-    type: "ArrayBuffer",
-    length: rawBody.byteLength,
-    prefix120: bodyBuffer.toString("utf8").slice(0, 120),
-  });
+  // Content-Length header vs actual received bytes
+  const contentLength = req.headers.get("content-length");
 
-  console.log("[IG APP CONFIG]", {
-    INSTAGRAM_APP_ID: process.env.INSTAGRAM_APP_ID,
-    META_APP_ID: process.env.META_APP_ID
+  console.log("[BODY HASH CHAIN]", {
+    hashL1,                                          // SHA256 immediately after req.arrayBuffer()
+    hashL2,                                          // SHA256 after Buffer.from(rawBody)
+    hashesMatch:         hashL1 === hashL2,          // should always be true
+    byteLength:          rawBody.byteLength,         // ArrayBuffer byte count
+    bufferLength:        bodyBuffer.length,          // Buffer byte count
+    contentLength,                                   // Content-Length header Meta declared
+    contentLengthMatch:  contentLength
+      ? parseInt(contentLength) === bodyBuffer.length
+      : "header-absent",
   });
 
   // ── Signature verification ────────────────────────────────────────────────
@@ -96,6 +96,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         expectedLength:  expectedFull.length,
         lengthsMatch:    signature.length === expectedFull.length,
         match:           signature === expectedFull,
+        contentLength,
+        contentLengthMatch: contentLength
+          ? parseInt(contentLength) === bodyBuffer.length
+          : "header-absent",
+        hashL1,
+        hashL2,
+        hashChainIntact: hashL1 === hashL2,
         bodyPrefix:      bodyBuffer.toString("utf8").slice(0, 200),
       };
       await getProducerRedis().set("forensic:ig:last-mismatch", JSON.stringify(forensic), "EX", 7200);

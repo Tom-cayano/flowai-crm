@@ -18,8 +18,10 @@
 // Must be in middleware PUBLIC_API_PREFIXES (no session cookie required).
 
 import { NextRequest, NextResponse } from "next/server";
+import { createHmac, createHash } from "crypto";
 import { verifyWebhookSignature } from "@/lib/instagram/client";
 import { enqueueIGMessage, enqueueIGComment } from "@/lib/queue/producers";
+import { getProducerRedis } from "@/lib/redis/client";
 import type { IGMessageJob, IGCommentJob } from "@/lib/queue/types";
 
 // ─── GET — webhook verification handshake ─────────────────────────────────────
@@ -79,7 +81,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // ── Signature verification ────────────────────────────────────────────────
   const signature = req.headers.get("x-hub-signature-256") ?? "";
   if (!verifyWebhookSignature(bodyBuffer, signature)) {
-    // Return 200 to prevent Meta from retrying with bad secret — just drop it
+    // Capture full forensic data in Redis for retrieval via GET /api/ops/debug-signature
+    try {
+      const secret       = (process.env.INSTAGRAM_APP_SECRET || process.env.META_APP_SECRET || "").trim();
+      const expectedFull = secret ? `sha256=${createHmac("sha256", secret).update(bodyBuffer).digest("hex")}` : "";
+      const bodyHash     = createHash("sha256").update(bodyBuffer).digest("hex");
+      const forensic = {
+        timestamp:       new Date().toISOString(),
+        signatureFull:   signature,
+        expectedFull,
+        bodyHash,
+        bodyLength:      bodyBuffer.length,
+        signatureLength: signature.length,
+        expectedLength:  expectedFull.length,
+        lengthsMatch:    signature.length === expectedFull.length,
+        match:           signature === expectedFull,
+        bodyPrefix:      bodyBuffer.toString("utf8").slice(0, 200),
+      };
+      await getProducerRedis().set("forensic:ig:last-mismatch", JSON.stringify(forensic), "EX", 7200);
+    } catch { /* Redis unavailable — don't block response */ }
+
     console.warn("[ig-webhook] Signature mismatch — dropping event");
     return NextResponse.json({ received: false }, { status: 200 });
   }

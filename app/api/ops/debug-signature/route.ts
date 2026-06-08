@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHmac, createHash } from "crypto";
+import { getProducerRedis } from "@/lib/redis/client";
 
-// GET — returns SHA256 of the runtime secret without needing a real webhook body.
-// Use this to verify which exact secret the runtime loaded.
-// Compare the returned secretSha256 with:
-//   node -e "const c=require('crypto');console.log(c.createHash('sha256').update('YOUR_SECRET').digest('hex'))"
+// GET — returns:
+//   forensic.activeSecret  — SHA256 of the runtime secret
+//   forensic.lastMismatch  — full signatureFull + expectedFull from the last failing Meta event
 export async function GET(_req: NextRequest) {
   const envIGSecret   = process.env.INSTAGRAM_APP_SECRET ?? "";
   const envMetaSecret = process.env.META_APP_SECRET ?? "";
@@ -14,16 +14,21 @@ export async function GET(_req: NextRequest) {
   const usedVar     = igTrimmed ? "INSTAGRAM_APP_SECRET" : metaTrimmed ? "META_APP_SECRET" : "NONE";
   const appSecret   = igTrimmed || metaTrimmed;
 
+  // Retrieve last captured mismatch from Redis (written by webhook route on failure)
+  let lastMismatch: unknown = null;
+  try {
+    const raw = await getProducerRedis().get("forensic:ig:last-mismatch");
+    if (raw) lastMismatch = JSON.parse(raw);
+  } catch { /* Redis unavailable */ }
+
   return NextResponse.json({
     forensic: {
       usedVar,
-      // Which secret verifyWebhookSignature actually uses
       activeSecret: {
         length:  appSecret.length,
         prefix:  appSecret.slice(0, 4),
         sha256:  appSecret ? createHash("sha256").update(appSecret).digest("hex") : null,
       },
-      // Individual SHA256s — use these to detect if the two vars differ
       INSTAGRAM_APP_SECRET: envIGSecret ? {
         length:  igTrimmed.length,
         prefix:  igTrimmed.slice(0, 4),
@@ -35,6 +40,8 @@ export async function GET(_req: NextRequest) {
         sha256:  createHash("sha256").update(metaTrimmed).digest("hex"),
       } : null,
       secretsAreIdentical: !!igTrimmed && !!metaTrimmed && igTrimmed === metaTrimmed,
+      // Last failing event — populated after the next real Meta webhook fails
+      lastMismatch,
     }
   });
 }

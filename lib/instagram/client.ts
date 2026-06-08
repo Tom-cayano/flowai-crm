@@ -458,15 +458,23 @@ export function verifyWebhookSignature(
 
   const bodyHash = createHash("sha256").update(rawBodyBuffer).digest("hex");
 
+  const sigLen  = signature.length;
+  const expLen  = expected.length;
+  const strMatch = signature === expected;
+
   console.log("[IG HMAC DEBUG]", {
-    hasSignature: !!signature,
-    signaturePrefix: signature?.slice(0, 20),
-    bodyType: isBuffer ? "Buffer" : typeof rawBody,
-    bodyLength: rawBodyBuffer.length,
-    bodyHash: bodyHash,
-    expectedPrefix: expected.slice(0, 20),
-    receivedPrefix: signature?.slice(0, 20),
+    bodyType:      isBuffer ? "Buffer" : typeof rawBody,
+    bodyLength:    rawBodyBuffer.length,
+    bodyHash,
+    signatureLength: sigLen,
+    expectedLength:  expLen,
+    lengthsMatch:    sigLen === expLen,
+    stringMatch:     strMatch,
+    signatureFull:   signature,
+    expectedFull:    expected,
   });
+
+  if (strMatch) return true;
 
   try {
     return timingSafeEqual(
@@ -474,7 +482,7 @@ export function verifyWebhookSignature(
       Buffer.from(expected),
     );
   } catch (err) {
-    console.warn("[ig-client] timingSafeEqual failed (likely length mismatch):", (err as Error).message);
+    console.warn("[ig-client] timingSafeEqual threw — length mismatch:", sigLen, "vs", expLen, (err as Error).message);
     return false;
   }
 }

@@ -93,12 +93,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // Capture full forensic data in Redis for retrieval via GET /api/ops/debug-signature
     try {
       const secret       = (process.env.INSTAGRAM_APP_SECRET || process.env.META_APP_SECRET || "").trim();
-      const expectedFull = secret ? `sha256=${createHmac("sha256", secret).update(bodyBuffer).digest("hex")}` : "";
-      const bodyHash     = createHash("sha256").update(bodyBuffer).digest("hex");
+      const expectedFull    = secret ? `sha256=${createHmac("sha256", secret).update(bodyBuffer).digest("hex")}` : "";
+      const secretHexBuf    = /^[0-9a-fA-F]+$/.test(secret) ? Buffer.from(secret, "hex") : null;
+      const expectedHexKey  = secretHexBuf ? `sha256=${createHmac("sha256", secretHexBuf).update(bodyBuffer).digest("hex")}` : "not-hex";
+      const bodyHash        = createHash("sha256").update(bodyBuffer).digest("hex");
       const forensic = {
         timestamp:       new Date().toISOString(),
         signatureFull:   signature,
         expectedFull,
+        expectedHexKey,
+        hexKeyMatchesSignature: expectedHexKey === signature,
         bodyHash,
         bodyLength:      bodyBuffer.length,
         signatureLength: signature.length,
@@ -112,7 +116,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         hashL1,
         hashL2,
         hashChainIntact: hashL1 === hashL2,
-        bodyPrefix:      bodyBuffer.toString("utf8").slice(0, 200),
+        bodyFull:        bodyBuffer.toString("utf8"),
         sigHeaders,
       };
       await getProducerRedis().set("forensic:ig:last-mismatch", JSON.stringify(forensic), "EX", 7200);

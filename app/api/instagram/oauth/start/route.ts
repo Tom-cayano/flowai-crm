@@ -62,6 +62,7 @@ const IG_SCOPES = [
   "pages_show_list",            // list Facebook Pages the user manages
   "pages_read_engagement",      // read Page engagement metrics
   "pages_manage_metadata",      // subscribe Page to webhook events
+  "pages_messaging",            // subscribe Page to receive messages webhooks
   // instagram_manage_comments removed — requires App Review approval
 ].join(",");
 

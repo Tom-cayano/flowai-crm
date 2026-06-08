@@ -299,7 +299,7 @@ export async function subscribePageToWebhooks(
   await graphFetch(`/${pageId}/subscribed_apps`, {
     method: "POST",
     body: JSON.stringify({
-      subscribed_fields: ["messages", "messaging_reads", "comments", "mentions"],
+      subscribed_fields: ["messages", "message_reads", "mention", "feed"],
       access_token:      pageAccessToken,
     }),
   });

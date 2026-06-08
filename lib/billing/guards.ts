@@ -33,6 +33,15 @@ export async function assertFeature(
   workspaceId: string,
   feature: PlanFeature
 ): Promise<void> {
+  // Development bypass — PLAN_GATE_BYPASS=true unlocks all features including
+  // the subscription existence check so local testing never requires Stripe.
+  if (
+    process.env.NODE_ENV !== "production" &&
+    process.env.PLAN_GATE_BYPASS === "true"
+  ) {
+    return;
+  }
+
   const sub = await getWorkspaceSubscription(workspaceId);
   if (!sub) {
     throw new BillingError("NO_SUBSCRIPTION", "No se encontró suscripción activa.");

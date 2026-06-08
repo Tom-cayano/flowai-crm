@@ -17,9 +17,19 @@
 //     → /settings/instagram?connected=1
 //
 // Required env vars:
-//   INSTAGRAM_APP_ID, INSTAGRAM_APP_SECRET, NEXT_PUBLIC_BASE_URL
+//   INSTAGRAM_APP_ID (or META_APP_ID)
+//   INSTAGRAM_APP_SECRET (or META_APP_SECRET)
+//   NEXT_PUBLIC_BASE_URL
 //   INSTAGRAM_TOKEN_ENCRYPTION_KEY
 //   INSTAGRAM_WEBHOOK_VERIFY_TOKEN
+//
+// Scopes required (valid from Jan 27 2025):
+//   instagram_business_basic
+//   instagram_business_manage_messages
+//   instagram_business_manage_comments
+//   pages_show_list
+//   pages_read_engagement
+//   pages_manage_metadata
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
@@ -31,6 +41,10 @@ import {
   getIGUser,
   getPages,
   subscribePageToWebhooks,
+  resolveAppId,
+  resolveAppSecret,
+  resolveRedirectUri,
+  IGConfigError,
 } from "@/lib/instagram/client";
 import { encryptToken } from "@/lib/instagram/token-store";
 
@@ -39,13 +53,14 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const { searchParams } = req.nextUrl;
   const code  = searchParams.get("code");
-  const state = searchParams.get("state");   // workspace-scoped CSRF token (optional)
+  const state = searchParams.get("state");   // user.id sent in state param
   const error = searchParams.get("error");
 
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? "";
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL?.replace(/\/$/, "") ?? "";
 
   // ── User denied permission ─────────────────────────────────────────────────
   if (error) {
+    console.warn("[ig-oauth] User denied permission:", searchParams.get("error_description"));
     return NextResponse.redirect(`${baseUrl}/settings/instagram?error=denied`);
   }
 
@@ -58,6 +73,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     return NextResponse.redirect(`${baseUrl}/login`);
+  }
+
+  // Validate state matches the user who initiated OAuth
+  if (state && state !== user.id) {
+    console.warn("[ig-oauth] State mismatch — possible CSRF. state:", state, "user:", user.id);
+    return NextResponse.redirect(`${baseUrl}/settings/instagram?error=state_mismatch`);
   }
 
   // ── Feature gate ──────────────────────────────────────────────────────────
@@ -76,12 +97,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   try {
-    // ── Exchange code → short-lived token → long-lived token ─────────────
-    const appId     = process.env.INSTAGRAM_APP_ID     ?? "";
-    const appSecret = process.env.INSTAGRAM_APP_SECRET ?? "";
-    const redirectUri = `${baseUrl}/api/instagram/oauth/callback`;
+    // ── Validate config before making any API calls ───────────────────────
+    const appId      = resolveAppId();
+    const appSecret  = resolveAppSecret();
+    const redirectUri = resolveRedirectUri();
 
-    // Step 1: code → short-lived user access token
+    console.info("[ig-oauth] Starting callback — appId:", appId, "redirectUri:", redirectUri);
+
+    // ── Step 1: code → short-lived user access token ──────────────────────
     const tokenRes = await fetch(
       `https://graph.facebook.com/v21.0/oauth/access_token?` +
       new URLSearchParams({
@@ -91,45 +114,61 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         code,
       }).toString()
     );
-    const tokenData = await tokenRes.json() as { access_token?: string; error?: { message: string } };
+    const tokenData = await tokenRes.json() as { access_token?: string; error?: { message: string; code?: number } };
+
     if (!tokenData.access_token) {
-      throw new Error(tokenData.error?.message ?? "Token exchange failed");
+      const msg = tokenData.error?.message ?? "Token exchange failed (no access_token in response)";
+      const code_ = tokenData.error?.code;
+      console.error("[ig-oauth] Token exchange failed:", msg, "code:", code_);
+      throw new Error(msg);
     }
 
-    // Step 2: short-lived → long-lived (60 days)
+    console.info("[ig-oauth] Short-lived token obtained — exchanging for long-lived token");
+
+    // ── Step 2: short-lived → long-lived (60 days) ────────────────────────
     const longLived = await exchangeForLongLivedToken(tokenData.access_token);
     const accessToken = longLived.access_token;
     const expiresAt = longLived.expires_in
       ? new Date(Date.now() + longLived.expires_in * 1_000)
       : null;
 
+    console.info("[ig-oauth] Long-lived token obtained — fetching pages");
+
     // ── Resolve Instagram Business account ───────────────────────────────
     const pages = await getPages(accessToken);
+    console.info(`[ig-oauth] Found ${pages.length} pages`);
+
     const db    = createAdminClient();
 
     let connectedCount = 0;
 
     for (const page of pages) {
       const igAccountId = page.instagram_business_account?.id;
-      if (!igAccountId) continue;
+      if (!igAccountId) {
+        console.info(`[ig-oauth] Page ${page.id} (${page.name}) has no Instagram Business account — skipping`);
+        continue;
+      }
+
+      console.info(`[ig-oauth] Connecting Instagram account ${igAccountId} via page ${page.id} (${page.name})`);
 
       // Get Instagram username + profile info
       let igUser;
       try {
         igUser = await getIGUser(page.access_token);
-      } catch {
+      } catch (err) {
+        console.warn(`[ig-oauth] Could not fetch IG user for page ${page.id}:`, err instanceof Error ? err.message : err);
         igUser = { id: igAccountId, username: "", followers_count: 0 };
       }
 
       // Subscribe page to Meta webhook events
       try {
         await subscribePageToWebhooks(page.id, page.access_token);
+        console.info(`[ig-oauth] Page ${page.id} subscribed to webhooks`);
       } catch (err) {
-        console.warn(`[ig-oauth] Failed to subscribe page ${page.id} to webhooks:`, err);
+        console.warn(`[ig-oauth] Failed to subscribe page ${page.id} to webhooks:`, err instanceof Error ? err.message : err);
       }
 
       // Persist page access token for Messenger (same encryption key as IG tokens)
-      // facebook_pages.page_id is the dedup key — upsert is safe to call on reconnect
       try {
         const pageTokenEnc = encryptToken(page.access_token);
         await db.from("facebook_pages").upsert(
@@ -146,7 +185,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         );
       } catch (err) {
         // Non-fatal — Messenger will fall back to FACEBOOK_PAGE_ACCESS_TOKEN env var
-        console.warn(`[ig-oauth] Failed to upsert facebook_pages for page ${page.id}:`, err);
+        console.warn(`[ig-oauth] Failed to upsert facebook_pages for page ${page.id}:`, err instanceof Error ? err.message : err);
       }
 
       // Upsert instagram_accounts row
@@ -171,21 +210,32 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         { onConflict: "workspace_id,ig_user_id" }
       );
 
+      console.info(`[ig-oauth] ✅ Instagram account ${igAccountId} (@${igUser.username}) connected`);
       connectedCount++;
     }
 
     if (connectedCount === 0) {
+      console.warn("[ig-oauth] No Instagram Business accounts found on any authorized page");
       return NextResponse.redirect(
         `${baseUrl}/settings/instagram?error=no_ig_account`
       );
     }
 
+    console.info(`[ig-oauth] OAuth complete — ${connectedCount} account(s) connected`);
+
     return NextResponse.redirect(
       `${baseUrl}/settings/instagram?connected=${connectedCount}`
     );
   } catch (err) {
-    console.error("[ig-oauth] OAuth callback error:", err);
+    const isConfigError = err instanceof IGConfigError;
+    console.error("[ig-oauth] OAuth callback error:", err instanceof Error ? err.message : err);
     const msg = err instanceof Error ? err.message : "Unknown error";
+
+    if (isConfigError) {
+      // Config errors should be loud — they indicate a deployment problem
+      console.error("[ig-oauth] FATAL CONFIG ERROR:", msg);
+    }
+
     return NextResponse.redirect(
       `${baseUrl}/settings/instagram?error=oauth_failed&message=${encodeURIComponent(msg)}`
     );

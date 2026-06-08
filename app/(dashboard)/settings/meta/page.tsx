@@ -289,7 +289,7 @@ export default function MetaSettingsPage() {
                 },
                 {
                   channel: "Instagram DM",
-                  perms: ["instagram_basic", "instagram_manage_messages", "pages_manage_metadata"],
+                  perms: ["instagram_business_basic", "instagram_business_manage_messages", "instagram_business_manage_comments", "pages_show_list", "pages_read_engagement", "pages_manage_metadata"],
                 },
                 {
                   channel: "Facebook Messenger",

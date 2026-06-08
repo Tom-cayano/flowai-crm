@@ -4,6 +4,7 @@
 
 export {
   IGApiError,
+  IGConfigError,
   getIGUser,
   getPages,
   sendDM,
@@ -16,6 +17,11 @@ export {
   refreshLongLivedToken,
   subscribePageToWebhooks,
   verifyWebhookSignature,
+  resolveAppId,
+  resolveAppSecret,
+  resolveBaseUrl,
+  resolveRedirectUri,
+  checkIGConfig,
 } from "@/lib/instagram/client";
 
 export type {
@@ -24,4 +30,5 @@ export type {
   IGTokenInfo,
   IGCommentReplyResult,
   IGPage,
+  IGConfigCheck,
 } from "@/lib/instagram/client";

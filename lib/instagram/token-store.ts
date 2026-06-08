@@ -18,11 +18,19 @@ const IV_BYTES  = 12;  // 96-bit IV recommended for GCM
 const TAG_BYTES = 16;  // 128-bit auth tag
 
 function getEncryptionKey(): Buffer {
-  const hex = process.env.INSTAGRAM_TOKEN_ENCRYPTION_KEY ?? "";
+  // .trim() strips trailing \n, \r, spaces that Vercel CLI or copy-paste tools
+  // may silently append — the root cause of "got 65" instead of 64.
+  const hex = (process.env.INSTAGRAM_TOKEN_ENCRYPTION_KEY ?? "").trim();
   if (hex.length !== 64) {
     throw new Error(
-      "INSTAGRAM_TOKEN_ENCRYPTION_KEY must be 64 hex characters (32 bytes). " +
+      `INSTAGRAM_TOKEN_ENCRYPTION_KEY must be 64 hex characters (32 bytes), got ${hex.length}. ` +
       "Generate with: openssl rand -hex 32"
+    );
+  }
+  if (!/^[0-9a-fA-F]{64}$/.test(hex)) {
+    throw new Error(
+      "INSTAGRAM_TOKEN_ENCRYPTION_KEY contains non-hex characters. " +
+      "Must be exactly 64 hex characters (0-9, a-f)."
     );
   }
   return Buffer.from(hex, "hex");

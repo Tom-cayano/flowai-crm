@@ -40,12 +40,14 @@ export const env = {
     appSecret:          () => optional("INSTAGRAM_APP_SECRET") || optional("META_APP_SECRET"),
     webhookVerifyToken: () => optional("INSTAGRAM_WEBHOOK_VERIFY_TOKEN"),
     tokenEncKey:        () => optional("INSTAGRAM_TOKEN_ENCRYPTION_KEY"),
-    isConfigured: (): boolean =>
-      !!(
-        (process.env.INSTAGRAM_APP_ID || process.env.META_APP_ID) &&
-        (process.env.INSTAGRAM_APP_SECRET || process.env.META_APP_SECRET) &&
-        process.env.INSTAGRAM_TOKEN_ENCRYPTION_KEY
-      ),
+    isConfigured: (): boolean => {
+      const appId     = process.env.INSTAGRAM_APP_ID || process.env.META_APP_ID || "";
+      const appSecret = process.env.INSTAGRAM_APP_SECRET || process.env.META_APP_SECRET || "";
+      const encKey    = process.env.INSTAGRAM_TOKEN_ENCRYPTION_KEY || "";
+      // Guard against placeholder value
+      const secretIsPlaceholder = appSecret === "REEMPLAZA_CON_TU_META_APP_SECRET";
+      return !!(appId && appSecret && !secretIsPlaceholder && encKey);
+    },
   },
   facebook: {
     verifyToken:     () => optional("FACEBOOK_VERIFY_TOKEN"),
@@ -88,10 +90,19 @@ export function validateEnv(): EnvReport {
     "META_APP_ID",
     "META_APP_SECRET",
     "META_WEBHOOK_VERIFY_TOKEN",
+    "INSTAGRAM_APP_ID",
+    "INSTAGRAM_APP_SECRET",
     "INSTAGRAM_TOKEN_ENCRYPTION_KEY",
+    "INSTAGRAM_WEBHOOK_VERIFY_TOKEN",
     "OPENAI_API_KEY",
     "NEXT_PUBLIC_BASE_URL",
   ];
+
+  // Detect placeholder App Secret
+  const appSecret = process.env.INSTAGRAM_APP_SECRET || process.env.META_APP_SECRET || "";
+  if (appSecret === "REEMPLAZA_CON_TU_META_APP_SECRET") {
+    warnings.push("INSTAGRAM_APP_SECRET is still the placeholder value — Instagram OAuth WILL fail");
+  }
 
   for (const k of hard) if (!process.env[k]) missing.push(k);
   for (const k of soft) if (!process.env[k]) warnings.push(k);

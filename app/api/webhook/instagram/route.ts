@@ -113,6 +113,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         hashL2,
         hashChainIntact: hashL1 === hashL2,
         bodyPrefix:      bodyBuffer.toString("utf8").slice(0, 200),
+        sigHeaders,
       };
       await getProducerRedis().set("forensic:ig:last-mismatch", JSON.stringify(forensic), "EX", 7200);
     } catch { /* Redis unavailable — don't block response */ }

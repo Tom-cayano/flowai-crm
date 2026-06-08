@@ -54,8 +54,8 @@ export async function POST(req: NextRequest) {
       hadTrailingWhitespace: rawSecret.length !== appSecret.length,
       secretSha256:          appSecret ? createHash("sha256").update(appSecret).digest("hex") : null,
       bodyLength:            rawBody.byteLength,
-      expectedPrefix:        expected.slice(0, 20),
-      receivedPrefix:        signature.slice(0, 20),
+      expectedFull:          expected,
+      receivedFull:          signature,
       match:                 !!expected && expected === signature,
       isPlaceholder:         appSecret === "REEMPLAZA_CON_TU_META_APP_SECRET",
     }

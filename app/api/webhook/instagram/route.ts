@@ -58,6 +58,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const rawBody = await req.arrayBuffer();
   const bodyBuffer = Buffer.from(rawBody);
 
+  console.log("[IG BODY HASH]", {
+    type: "ArrayBuffer",
+    length: rawBody.byteLength,
+    prefix120: bodyBuffer.toString("utf8").slice(0, 120),
+  });
+
   // ── Signature verification ────────────────────────────────────────────────
   const signature = req.headers.get("x-hub-signature-256") ?? "";
   if (!verifyWebhookSignature(bodyBuffer, signature)) {

@@ -410,7 +410,7 @@ export async function getMedia(
 
 // ─── Webhook verification ──────────────────────────────────────────────────────
 
-import { createHmac, timingSafeEqual } from "crypto";
+import { createHmac, createHash, timingSafeEqual } from "crypto";
 
 /**
  * Verify the X-Hub-Signature-256 header sent by Meta on every webhook POST.
@@ -423,28 +423,49 @@ export function verifyWebhookSignature(
   rawBody:   Buffer | string,
   signature: string,
 ): boolean {
-  const envSecret = process.env.INSTAGRAM_APP_SECRET || process.env.META_APP_SECRET || "";
-  const appSecret = envSecret.trim(); // Prevent \n from invalidating HMAC
+  const isBuffer = Buffer.isBuffer(rawBody);
+  const rawBodyBuffer = isBuffer ? rawBody : Buffer.from(rawBody);
 
-  const expected = `sha256=${createHmac("sha256", appSecret)
-    .update(rawBody)
-    .digest("hex")}`;
+  const envIGSecret = process.env.INSTAGRAM_APP_SECRET || "";
+  const envMetaSecret = process.env.META_APP_SECRET || "";
+  
+  let usedVarName = "";
+  let appSecret = "";
+  if (envIGSecret) {
+    usedVarName = "INSTAGRAM_APP_SECRET";
+    appSecret = envIGSecret.trim();
+  } else if (envMetaSecret) {
+    usedVarName = "META_APP_SECRET";
+    appSecret = envMetaSecret.trim();
+  }
 
-  console.log("[IG SIGNATURE DEBUG]", {
-    hasSignature: !!signature,
-    signaturePrefix: signature?.slice(0, 20),
+  console.log("[IG SECRET SOURCE]", {
+    usedVarName,
     hasSecret: !!appSecret,
-    secretLength: appSecret?.length,
-    envSecretLength: envSecret?.length,
-    bodyLength: rawBody.length,
-    expectedPrefix: expected.slice(0, 20),
-    receivedPrefix: signature?.slice(0, 20),
+    secretLength: appSecret.length,
+    secretPrefix: appSecret.slice(0, 4),
   });
 
   if (!appSecret) {
     console.warn("[ig-client] verifyWebhookSignature: no app secret configured — rejecting");
     return false;
   }
+
+  const expected = `sha256=${createHmac("sha256", appSecret)
+    .update(rawBodyBuffer)
+    .digest("hex")}`;
+
+  const bodyHash = createHash("sha256").update(rawBodyBuffer).digest("hex");
+
+  console.log("[IG HMAC DEBUG]", {
+    hasSignature: !!signature,
+    signaturePrefix: signature?.slice(0, 20),
+    bodyType: isBuffer ? "Buffer" : typeof rawBody,
+    bodyLength: rawBodyBuffer.length,
+    bodyHash: bodyHash,
+    expectedPrefix: expected.slice(0, 20),
+    receivedPrefix: signature?.slice(0, 20),
+  });
 
   try {
     return timingSafeEqual(

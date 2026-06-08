@@ -37,7 +37,7 @@ export function resolveAppId(): string {
       "Get your App ID from: Meta Developers → Your App → Settings → Basic."
     );
   }
-  return id;
+  return id.trim();
 }
 
 /**
@@ -61,7 +61,7 @@ export function resolveAppSecret(): string {
       "Replace it with the real App Secret from Meta Developers → Your App → Settings → Basic."
     );
   }
-  return secret;
+  return secret.trim();
 }
 
 /**

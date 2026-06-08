@@ -423,7 +423,17 @@ export function verifyWebhookSignature(
   rawBody:   Buffer | string,
   signature: string,
 ): boolean {
-  const appSecret = process.env.INSTAGRAM_APP_SECRET || process.env.META_APP_SECRET || "";
+  const envSecret = process.env.INSTAGRAM_APP_SECRET || process.env.META_APP_SECRET || "";
+  const appSecret = envSecret.trim(); // Prevent \n from invalidating HMAC
+
+  console.log("[IG SIGNATURE DEBUG]", {
+    hasSignature: !!signature,
+    signaturePrefix: signature?.slice(0, 20),
+    hasSecret: !!appSecret,
+    secretLength: appSecret?.length,
+    envSecretLength: envSecret?.length, // To see if trailing newline existed
+  });
+
   if (!appSecret) {
     console.warn("[ig-client] verifyWebhookSignature: no app secret configured — rejecting");
     return false;

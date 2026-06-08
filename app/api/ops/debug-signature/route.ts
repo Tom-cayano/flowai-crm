@@ -47,8 +47,9 @@ export async function GET(_req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const rawBody   = await req.arrayBuffer();
-  const signature = req.headers.get("x-hub-signature-256") ?? "";
+  const rawBody      = await req.arrayBuffer();
+  const sig256       = req.headers.get("x-hub-signature-256") ?? "";
+  const sig1         = req.headers.get("x-hub-signature")     ?? "";
 
   const envIGSecret   = process.env.INSTAGRAM_APP_SECRET ?? "";
   const envMetaSecret = process.env.META_APP_SECRET ?? "";
@@ -57,24 +58,30 @@ export async function POST(req: NextRequest) {
   const appSecret     = rawSecret.trim();
   const bodyBuf       = Buffer.from(rawBody);
 
-  const expected = appSecret
+  const expected256 = appSecret
     ? `sha256=${createHmac("sha256", appSecret).update(bodyBuf).digest("hex")}`
+    : "";
+  const expected1 = appSecret
+    ? `sha1=${createHmac("sha1", appSecret).update(bodyBuf).digest("hex")}`
     : "";
 
   return NextResponse.json({
     debug: {
       usedVar,
-      hasSignature:          !!signature,
-      signaturePrefix:       signature.slice(0, 20),
       hasSecret:             !!appSecret,
       secretLength:          appSecret.length,
       rawLength:             rawSecret.length,
       hadTrailingWhitespace: rawSecret.length !== appSecret.length,
       secretSha256:          appSecret ? createHash("sha256").update(appSecret).digest("hex") : null,
       bodyLength:            rawBody.byteLength,
-      expectedFull:          expected,
-      receivedFull:          signature,
-      match:                 !!expected && expected === signature,
+      // SHA-256
+      expectedFull:          expected256,
+      receivedFull:          sig256,
+      match:                 !!expected256 && expected256 === sig256,
+      // SHA-1 (independent key-verification channel)
+      expectedSha1:          expected1,
+      receivedSha1:          sig1,
+      matchSha1:             !!expected1 && expected1 === sig1,
       isPlaceholder:         appSecret === "REEMPLAZA_CON_TU_META_APP_SECRET",
     }
   });

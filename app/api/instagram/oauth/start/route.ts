@@ -59,10 +59,10 @@ export const dynamic = "force-dynamic";
 const IG_SCOPES = [
   "instagram_basic",            // read IG profile linked to a Facebook Page
   "instagram_manage_messages",  // send/receive DMs via Messenger Platform
-  "instagram_manage_comments",  // read/reply to comments
   "pages_show_list",            // list Facebook Pages the user manages
   "pages_read_engagement",      // read Page engagement metrics
   "pages_manage_metadata",      // subscribe Page to webhook events
+  // instagram_manage_comments removed — requires App Review approval
 ].join(",");
 
 export async function GET(): Promise<NextResponse> {

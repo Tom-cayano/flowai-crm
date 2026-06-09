@@ -28,7 +28,7 @@ import type { Database } from "@/types/supabase";
 //                  the dashboard.
 
 /** Page routes that do not require a session. */
-const PUBLIC_ROUTES = ["/login", "/signup", "/auth", "/", "/pricing", "/forgot-password", "/update-password"];
+const PUBLIC_ROUTES = ["/login", "/signup", "/auth", "/", "/pricing", "/forgot-password", "/update-password", "/privacy", "/terms", "/data-deletion"];
 
 /** Page routes that redirect to /dashboard when the user is already logged in. */
 const AUTH_ROUTES = ["/login", "/signup"];

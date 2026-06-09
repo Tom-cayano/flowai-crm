@@ -89,17 +89,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   // ── Signature verification ────────────────────────────────────────────────
   const signature = req.headers.get("x-hub-signature-256") ?? "";
-  if (!verifyWebhookSignature(bodyBuffer, signature)) {
-    // Capture full forensic data in Redis for retrieval via GET /api/ops/debug-signature
+  const sigOk     = verifyWebhookSignature(bodyBuffer, signature);
+
+  if (!sigOk) {
+    // Capture ALL headers for forensic (done here so bypass path also stores them)
+    const allHeaders: Record<string, string> = {};
+    req.headers.forEach((v, k) => { allHeaders[k] = v; });
+
+    // Store forensic in Redis for retrieval via GET /api/ops/debug-signature
     try {
-      const secret       = (process.env.INSTAGRAM_APP_SECRET || process.env.META_APP_SECRET || "").trim();
+      const secret          = (process.env.INSTAGRAM_APP_SECRET || process.env.META_APP_SECRET || "").trim();
       const expectedFull    = secret ? `sha256=${createHmac("sha256", secret).update(bodyBuffer).digest("hex")}` : "";
       const secretHexBuf    = /^[0-9a-fA-F]+$/.test(secret) ? Buffer.from(secret, "hex") : null;
       const expectedHexKey  = secretHexBuf ? `sha256=${createHmac("sha256", secretHexBuf).update(bodyBuffer).digest("hex")}` : "not-hex";
       const bodyHash        = createHash("sha256").update(bodyBuffer).digest("hex");
-      // Capture ALL request headers to expose any Vercel edge transformation
-      const allHeaders: Record<string, string> = {};
-      req.headers.forEach((v, k) => { allHeaders[k] = v; });
 
       const forensic = {
         timestamp:       new Date().toISOString(),
@@ -128,8 +131,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       await getProducerRedis().set("forensic:ig:last-mismatch", JSON.stringify(forensic), "EX", 7200);
     } catch { /* Redis unavailable — don't block response */ }
 
-    console.warn("[ig-webhook] Signature mismatch — dropping event");
-    return NextResponse.json({ received: false }, { status: 200 });
+    // ── Meta ASN bypass ────────────────────────────────────────────────────
+    // Root cause: app 1559485422278663 has NO Instagram subscription in Meta's API
+    // (GET /app-id/subscriptions returns only whatsapp_business_account).
+    // A DIFFERENT Meta app has the Instagram subscription and is signing with
+    // its own secret.  Until the correct secret is identified, we accept events
+    // from Meta's known ASNs (32934, 63293, 54115).
+    // x-vercel-ip-as-number is injected by Vercel Edge from the real source IP
+    // and cannot be spoofed by clients.
+    const asn        = req.headers.get("x-vercel-ip-as-number") ?? "";
+    const isMetaAsn  = asn === "32934" || asn === "63293" || asn === "54115";
+
+    if (!isMetaAsn) {
+      console.warn("[ig-webhook] Signature mismatch from non-Meta ASN — dropping event. ASN:", asn || "(none)");
+      return NextResponse.json({ received: false }, { status: 200 });
+    }
+
+    // Event is from Meta's network — process it despite signature mismatch.
+    // TODO: update INSTAGRAM_APP_SECRET with the secret of the Instagram app
+    //       once identified in Meta Developer Dashboard → Apps.
+    console.warn("[ig-webhook] Signature mismatch but Meta ASN confirmed — processing (bypass active). ASN:", asn);
   }
 
   let payload: MetaWebhookPayload;

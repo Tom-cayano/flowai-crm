@@ -97,6 +97,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       const secretHexBuf    = /^[0-9a-fA-F]+$/.test(secret) ? Buffer.from(secret, "hex") : null;
       const expectedHexKey  = secretHexBuf ? `sha256=${createHmac("sha256", secretHexBuf).update(bodyBuffer).digest("hex")}` : "not-hex";
       const bodyHash        = createHash("sha256").update(bodyBuffer).digest("hex");
+      // Capture ALL request headers to expose any Vercel edge transformation
+      const allHeaders: Record<string, string> = {};
+      req.headers.forEach((v, k) => { allHeaders[k] = v; });
+
       const forensic = {
         timestamp:       new Date().toISOString(),
         signatureFull:   signature,
@@ -117,6 +121,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         hashL2,
         hashChainIntact: hashL1 === hashL2,
         bodyFull:        bodyBuffer.toString("utf8"),
+        bodyHex:         bodyBuffer.toString("hex"),
+        allHeaders,
         sigHeaders,
       };
       await getProducerRedis().set("forensic:ig:last-mismatch", JSON.stringify(forensic), "EX", 7200);

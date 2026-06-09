@@ -16,7 +16,6 @@ export {
   exchangeForLongLivedToken,
   refreshLongLivedToken,
   subscribePageToWebhooks,
-  verifyWebhookSignature,
   resolveAppId,
   resolveAppSecret,
   resolveBaseUrl,

@@ -2,6 +2,7 @@
 // All calls are server-side only — access tokens never reach the browser.
 //
 // API version: v21.0
+// Webhook signature verification lives in: app/api/webhook/instagram/route.ts
 //
 // Scopes (valid from January 27, 2025 — instagram_business_* namespace):
 //   instagram_business_basic            (replaces instagram_basic)
@@ -210,8 +211,6 @@ export async function exchangeForLongLivedToken(
   const appId     = resolveAppId();
   const appSecret = resolveAppSecret();
 
-  console.info("[ig-client] exchangeForLongLivedToken — appId:", appId);
-
   const params = new URLSearchParams({
     grant_type:        "fb_exchange_token",
     client_id:         appId,
@@ -219,15 +218,7 @@ export async function exchangeForLongLivedToken(
     fb_exchange_token: shortLivedToken,
   });
 
-  try {
-    const result = await graphFetch<IGTokenInfo>(`/oauth/access_token?${params.toString()}`);
-    const expiresInDays = result.expires_in ? Math.round(result.expires_in / 86400) : "N/A";
-    console.info(`[ig-client] Long-lived token obtained — expires in ${expiresInDays} days`);
-    return result;
-  } catch (err) {
-    console.error("[ig-client] exchangeForLongLivedToken failed:", err instanceof Error ? err.message : err);
-    throw err;
-  }
+  return graphFetch<IGTokenInfo>(`/oauth/access_token?${params.toString()}`);
 }
 
 /**
@@ -242,23 +233,13 @@ export async function refreshLongLivedToken(
 ): Promise<IGTokenInfo> {
   const appSecret = resolveAppSecret();
 
-  console.info("[ig-client] refreshLongLivedToken — refreshing expiring token");
-
   const params = new URLSearchParams({
     grant_type:        "fb_exchange_token",
     client_secret:     appSecret,
     fb_exchange_token: currentToken,
   });
 
-  try {
-    const result = await graphFetch<IGTokenInfo>(`/oauth/access_token?${params.toString()}`);
-    const expiresInDays = result.expires_in ? Math.round(result.expires_in / 86400) : "N/A";
-    console.info(`[ig-client] Token refreshed — new expiry in ${expiresInDays} days`);
-    return result;
-  } catch (err) {
-    console.error("[ig-client] refreshLongLivedToken failed:", err instanceof Error ? err.message : err);
-    throw err;
-  }
+  return graphFetch<IGTokenInfo>(`/oauth/access_token?${params.toString()}`);
 }
 
 /**
@@ -408,84 +389,7 @@ export async function getMedia(
   return graphFetch(`/${mediaId}?${params.toString()}`);
 }
 
-// ─── Webhook verification ──────────────────────────────────────────────────────
-
-import { createHmac, createHash, timingSafeEqual } from "crypto";
-
-/**
- * Verify the X-Hub-Signature-256 header sent by Meta on every webhook POST.
- * Returns true if the signature matches, false otherwise.
- * MUST be called with the raw request body bytes (before JSON parsing).
- *
- * Uses INSTAGRAM_APP_SECRET → META_APP_SECRET fallback chain.
- */
-export function verifyWebhookSignature(
-  rawBody:   Buffer | string,
-  signature: string,
-): boolean {
-  const isBuffer = Buffer.isBuffer(rawBody);
-  const rawBodyBuffer = isBuffer ? rawBody : Buffer.from(rawBody);
-
-  const envIGSecret = process.env.INSTAGRAM_APP_SECRET || "";
-  const envMetaSecret = process.env.META_APP_SECRET || "";
-  
-  let usedVarName = "";
-  let appSecret = "";
-  if (envIGSecret) {
-    usedVarName = "INSTAGRAM_APP_SECRET";
-    appSecret = envIGSecret.trim();
-  } else if (envMetaSecret) {
-    usedVarName = "META_APP_SECRET";
-    appSecret = envMetaSecret.trim();
-  }
-
-  console.log("[IG SECRET SOURCE]", {
-    usedVarName,
-    hasSecret: !!appSecret,
-    secretLength: appSecret.length,
-    secretPrefix: appSecret.slice(0, 4),
-    secretSha256: createHash("sha256").update(appSecret).digest("hex"),
-  });
-
-  if (!appSecret) {
-    console.warn("[ig-client] verifyWebhookSignature: no app secret configured — rejecting");
-    return false;
-  }
-
-  const expected = `sha256=${createHmac("sha256", appSecret)
-    .update(rawBodyBuffer)
-    .digest("hex")}`;
-
-  const bodyHash = createHash("sha256").update(rawBodyBuffer).digest("hex");
-
-  const sigLen  = signature.length;
-  const expLen  = expected.length;
-  const strMatch = signature === expected;
-
-  console.log("[IG HMAC DEBUG]", {
-    bodyType:      isBuffer ? "Buffer" : typeof rawBody,
-    bodyLength:    rawBodyBuffer.length,
-    bodyHash,
-    signatureLength: sigLen,
-    expectedLength:  expLen,
-    lengthsMatch:    sigLen === expLen,
-    stringMatch:     strMatch,
-    signatureFull:   signature,
-    expectedFull:    expected,
-  });
-
-  if (strMatch) return true;
-
-  try {
-    return timingSafeEqual(
-      Buffer.from(signature),
-      Buffer.from(expected),
-    );
-  } catch (err) {
-    console.warn("[ig-client] timingSafeEqual threw — length mismatch:", sigLen, "vs", expLen, (err as Error).message);
-    return false;
-  }
-}
+// Webhook signature verification lives in: app/api/webhook/instagram/route.ts
 
 // ─── Config health check ──────────────────────────────────────────────────────
 

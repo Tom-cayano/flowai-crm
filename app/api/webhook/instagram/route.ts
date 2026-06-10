@@ -60,6 +60,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       await getProducerRedis().set("forensic:ig:last-mismatch", JSON.stringify({
         expectedFull: expected,
         receivedFull: signature,
+        contentLengthHeader: req.headers.get("content-length") || "unknown",
+        parsedBodyLength: bodyBuffer.length,
         bodyPreview: bodyBuffer.toString("utf8").substring(0, 200),
         time: new Date().toISOString()
       }), "EX", 3600);

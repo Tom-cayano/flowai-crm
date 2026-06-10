@@ -16,6 +16,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createHmac, timingSafeEqual } from "crypto";
+import { getProducerRedis } from "@/lib/redis/client";
 import { enqueueIGMessage, enqueueIGComment } from "@/lib/queue/producers";
 import type { IGMessageJob, IGCommentJob } from "@/lib/queue/types";
 
@@ -52,6 +53,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const signature = (req.headers.get("x-hub-signature-256") ?? "").trim();
   if (!verifySignature(bodyBuffer, signature)) {
     console.error("[ig-webhook] Signature verification failed — dropping event");
+    // Forensic capture of mismatch
+    try {
+      const secret = (process.env.INSTAGRAM_APP_SECRET || process.env.META_APP_SECRET || "").trim();
+      const expected = `sha256=${createHmac("sha256", secret).update(bodyBuffer).digest("hex")}`;
+      await getProducerRedis().set("forensic:ig:last-mismatch", JSON.stringify({
+        expectedFull: expected,
+        receivedFull: signature,
+        bodyPreview: bodyBuffer.toString("utf8").substring(0, 200),
+        time: new Date().toISOString()
+      }), "EX", 3600);
+    } catch {}
     return NextResponse.json({ received: false }, { status: 200 });
   }
 

@@ -158,11 +158,11 @@ export default async function MessengerIntegrationsPage() {
                 El flujo OAuth de Instagram también conecta las páginas de Facebook asociadas y
                 configura el webhook de Messenger en un solo paso.
               </p>
-              <Button size="sm" className="h-7 text-xs gap-1.5" asChild>
-                <Link href="/api/instagram/oauth/start">
-                  <Plus className="h-3 w-3" />
-                  Conectar Instagram + Messenger
-                </Link>
+              <Button asChild size="sm" className="h-8 text-xs gap-1.5 shrink-0">
+                <a href="/api/instagram/oauth/start" rel="noreferrer noopener">
+                  <Plus className="h-3.5 w-3.5" />
+                  Conectar cuenta
+                </a>
               </Button>
             </div>
           </div>

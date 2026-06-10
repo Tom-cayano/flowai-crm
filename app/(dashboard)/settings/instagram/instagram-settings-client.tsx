@@ -61,10 +61,10 @@ export function InstagramSettingsClient({ initialAccounts, allowed, successCount
 
         {allowed && (
           <Button asChild size="sm" className="h-8 text-xs gap-1.5 shrink-0">
-            <Link href="/api/instagram/oauth/start">
+            <a href="/api/instagram/oauth/start" rel="noreferrer noopener">
               <Plus className="h-3.5 w-3.5" />
               Conectar cuenta
-            </Link>
+            </a>
           </Button>
         )}
       </div>
@@ -119,10 +119,10 @@ export function InstagramSettingsClient({ initialAccounts, allowed, successCount
                 </p>
               </div>
               <Button asChild size="sm" className="text-xs h-8 gap-1.5">
-                <Link href="/api/instagram/oauth/start">
+                <a href="/api/instagram/oauth/start" rel="noreferrer noopener">
                   <Plus className="h-3.5 w-3.5" />
                   Conectar cuenta
-                </Link>
+                </a>
               </Button>
             </div>
           ) : (

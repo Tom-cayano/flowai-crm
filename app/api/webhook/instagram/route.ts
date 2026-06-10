@@ -46,8 +46,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 // ─── POST — event ingestion ───────────────────────────────────────────────────
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  const rawBody = await req.arrayBuffer();
-  const bodyBuffer = Buffer.from(rawBody);
+  const rawBodyText = await req.text();
+  const bodyBuffer = Buffer.from(rawBodyText, "utf8");
 
   // ── Signature verification ──────────────────────────────────────────────
   const signature = (req.headers.get("x-hub-signature-256") ?? "").trim();

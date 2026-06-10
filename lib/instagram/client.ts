@@ -71,13 +71,13 @@ export function resolveAppSecret(): string {
  */
 export function resolveBaseUrl(): string {
   const url = process.env.NEXT_PUBLIC_BASE_URL || "";
-  if (!url) {
+  if (!url.trim()) {
     throw new IGConfigError(
       "NEXT_PUBLIC_BASE_URL is not configured. " +
       "Set it to your production domain, e.g. https://www.flowaicrm.com"
     );
   }
-  return url.replace(/\/$/, ""); // strip trailing slash
+  return url.trim().replace(/\/$/, ""); // strip trailing slash and newlines
 }
 
 /**

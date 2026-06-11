@@ -49,6 +49,16 @@ export async function processIGMessage(job: IGMessageJob): Promise<void> {
   const mediaUrl     = attachments[0]?.payload?.url ?? null;
   const timestamp    = new Date(job.timestamp).toISOString();
 
+  // ── Check contact existence BEFORE upsert (needed for isFirstMessage) ───
+  // Must query before upsertIGContact because upsert always returns a row,
+  // making it impossible to distinguish new vs returning contacts after the fact.
+  const { data: priorIGContact } = await db
+    .from("instagram_contacts")
+    .select("id")
+    .eq("account_id", accountId)
+    .eq("ig_user_id", job.senderId)
+    .maybeSingle();
+
   // ── Upsert Instagram contact ───────────────────────────────────────────
   const igContact = await upsertIGContact(db, accountId, userId, job.senderId);
 
@@ -122,7 +132,8 @@ export async function processIGMessage(job: IGMessageJob): Promise<void> {
   }
 
   // ── Enqueue automation ─────────────────────────────────────────────────
-  const isFirstMessage = !igContact;  // no prior contact row = first ever message
+  // priorIGContact was checked BEFORE the upsert, so null means genuinely new contact.
+  const isFirstMessage = !priorIGContact;
   await enqueueAutomation({
     userId,
     conversationId: crmConv.id,
@@ -222,18 +233,20 @@ async function upsertCrmConversation(
   contactId: string | null,
   igUserId:  string,
 ) {
-  const { data: existing } = await db
-    .from("conversations")
-    .select("id, unread_count")
-    .eq("user_id", userId)
-    .eq("contact_phone", igUserId)
-    .eq("channel", "instagram")
-    .eq("status", "open")
-    .maybeSingle();
+  const selectOpenConversation = () =>
+    db
+      .from("conversations")
+      .select("id, unread_count")
+      .eq("user_id", userId)
+      .eq("contact_phone", igUserId)
+      .eq("channel", "instagram")
+      .eq("status", "open")
+      .maybeSingle();
 
+  const { data: existing } = await selectOpenConversation();
   if (existing) return existing;
 
-  const { data: created } = await db
+  const { data: created, error } = await db
     .from("conversations")
     .insert({
       user_id:       userId,
@@ -247,6 +260,14 @@ async function upsertCrmConversation(
     })
     .select("id, unread_count")
     .single();
+
+  if (error) {
+    // Race condition: another concurrent job inserted the row between our SELECT and
+    // INSERT. Re-query to pick up whichever row won the race.
+    console.warn("[ig-msg] upsertCrmConversation insert conflict — retrying select:", error.message);
+    const { data: retried } = await selectOpenConversation();
+    return retried ?? null;
+  }
 
   return created;
 }

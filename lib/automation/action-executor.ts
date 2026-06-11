@@ -40,7 +40,18 @@ export async function executeAction(
         const content = interpolate(action.content, ctx);
 
         try {
-          if (ctx.instanceName.startsWith("wac:")) {
+          if (ctx.instanceName.startsWith("ig:")) {
+            const accountId    = ctx.igAccountId ?? ctx.instanceName.slice(3);
+            const recipientIgId = ctx.igUserId ?? ctx.phone;
+            await enqueueIGOutbound({
+              accountId,
+              userId:         ctx.userId,
+              recipientIgId,
+              content,
+              conversationId: ctx.conversationId ?? "",
+              origin:         "automation",
+            });
+          } else if (ctx.instanceName.startsWith("wac:")) {
             const accountId = ctx.wacAccountId ?? ctx.instanceName.slice(4);
             await enqueueWACOutbound({
               accountId,
@@ -178,19 +189,29 @@ export async function executeAction(
       // ── AI reply ──────────────────────────────────────────────────────────
       case "ai_reply": {
         if (!ctx.conversationId) return { ok: true };
-        await runAIReply({
-          userId:         ctx.userId,
-          conversationId: ctx.conversationId,
-          phone:          ctx.phone,
-          incomingText:   ctx.incomingText,
-          instanceName:   ctx.instanceName,
-          serverUrl:      ctx.serverUrl,
-          instanceApiKey: ctx.instanceApiKey,
-          promptId:       action.promptId,
-          model:          action.model,
-          maxTokens:      action.maxTokens,
-          temperature:    action.temperature,
-        });
+        try {
+          await runAIReply({
+            userId:         ctx.userId,
+            conversationId: ctx.conversationId,
+            phone:          ctx.phone,
+            incomingText:   ctx.incomingText,
+            instanceName:   ctx.instanceName,
+            serverUrl:      ctx.serverUrl,
+            instanceApiKey: ctx.instanceApiKey,
+            promptId:       action.promptId,
+            model:          action.model,
+            maxTokens:      action.maxTokens,
+            temperature:    action.temperature,
+          });
+        } catch (aiErr) {
+          const msg = aiErr instanceof Error ? aiErr.message : String(aiErr);
+          // Re-throw on rate-limit/quota errors so BullMQ retries with backoff
+          if (msg.includes("429") || msg.toLowerCase().includes("rate") || msg.toLowerCase().includes("quota")) {
+            throw aiErr;
+          }
+          await log("error", `ai_reply error: ${msg}`);
+          return { ok: false, error: msg };
+        }
         await log("info", "Respuesta IA enviada");
         return { ok: true };
       }

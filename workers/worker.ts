@@ -47,6 +47,7 @@ import { processAI }         from "./processors/ai.processor";
 import { processIGMessage }         from "./processors/instagram-message.processor";
 import { processIGOutbound }        from "./processors/instagram-outbound.processor";
 import { processIGComment }         from "./processors/instagram-comment.processor";
+import { processIGMedia }           from "./processors/instagram-media.processor";
 import { maybeRefreshToken }        from "@/lib/instagram/token-store";
 import { processMessengerMessage }  from "./processors/messenger-message.processor";
 import { processMessengerOutbound } from "./processors/messenger-outbound.processor";
@@ -309,7 +310,7 @@ async function start(): Promise<void> {
       createWorker<IGMessageJob> (QUEUE_NAMES.IGM_MESSAGE,  (j) => processIGMessage(j.data),  CONCURRENCY.igMessage),
       createWorker<IGOutboundJob>(QUEUE_NAMES.IGM_OUTBOUND, (j) => processIGOutbound(j.data), CONCURRENCY.igOutbound),
       createWorker<IGCommentJob> (QUEUE_NAMES.IGM_COMMENT,  (j) => processIGComment(j.data),  CONCURRENCY.igComment),
-      createWorker<IGMediaJob>   (QUEUE_NAMES.IGM_MEDIA,    async () => {}, CONCURRENCY.igMedia),
+      createWorker<IGMediaJob>   (QUEUE_NAMES.IGM_MEDIA,    (j) => processIGMedia(j.data),   CONCURRENCY.igMedia),
       createWorker<IGTokenJob>   (QUEUE_NAMES.IGM_TOKEN,    (j) => maybeRefreshToken(j.data.accountId), CONCURRENCY.igToken),
     ] : []),
     // ── Facebook Messenger (off by default) ───────────────────────────────────

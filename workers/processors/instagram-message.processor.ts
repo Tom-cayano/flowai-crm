@@ -145,7 +145,7 @@ async function resolveAccount(db: DB, pageId: string) {
   const { data } = await db
     .from("instagram_accounts")
     .select("id, user_id")
-    .eq("page_id", pageId)
+    .eq("ig_user_id", pageId) // entry.id in IG webhooks is the ig_user_id, not the page_id
     .eq("is_active", true)
     .eq("connection_state", "connected")
     .maybeSingle();

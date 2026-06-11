@@ -212,7 +212,7 @@ export function Sidebar({ collapsed, onToggle, user, workspace }: SidebarProps) 
       {/* Bottom section */}
       <div className="py-3 px-2 space-y-0.5 border-t border-sidebar-border">
         {bottomItems.map((item) => {
-          const active = pathname === item.href || pathname.startsWith(item.href + "/");
+          const active = pathname === item.href || pathname?.startsWith(item.href + "/");
           // Avoid /settings matching /settings/team etc as "active" for the plain Settings item
           const isActive = item.href === "/settings"
             ? pathname === "/settings"

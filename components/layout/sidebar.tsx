@@ -180,7 +180,7 @@ export function Sidebar({ collapsed, onToggle, user, workspace }: SidebarProps) 
         {navItems.map((item) => {
           const active =
             pathname === item.href ||
-            (item.href !== "/" && pathname.startsWith(item.href));
+            (item.href !== "/" && pathname?.startsWith(item.href));
           return (
             <Link
               key={item.href}

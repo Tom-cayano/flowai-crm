@@ -45,7 +45,7 @@ export function Topbar({ user, workspace }: TopbarProps) {
 
   // Match exact path or first segment (e.g. /settings/billing → /settings)
   const key = Object.keys(pageTitles).find(
-    (k) => pathname === k || pathname.startsWith(k + "/")
+    (k) => pathname === k || pathname?.startsWith(k + "/")
   );
   const appName = workspace?.companyName ?? workspace?.name ?? "FlowAI CRM";
   const current = pageTitles[key ?? ""] ?? { title: appName, description: "" };

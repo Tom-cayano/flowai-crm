@@ -77,26 +77,44 @@ export function decryptToken(encoded: string): string {
 export async function getAccessToken(accountId: string): Promise<string | null> {
   try {
     const db = createAdminClient();
-    
+
     // 1. Get the page_id linked to this Instagram account
-    const { data: igAcc } = await db
+    const { data: igAcc, error: igAccErr } = await db
       .from("instagram_accounts")
       .select("page_id")
       .eq("id", accountId)
       .single();
 
-    if (!igAcc?.page_id) return null;
+    console.log("[ig-token] getAccessToken accountId=", accountId,
+      "page_id=", igAcc?.page_id ?? "MISSING",
+      "db_error=", igAccErr?.message ?? "none");
+
+    if (!igAcc?.page_id) {
+      console.warn("[ig-token] ⚠️  instagram_accounts.page_id is NULL for accountId", accountId,
+        "— getIGSenderInfo will NOT run");
+      return null;
+    }
 
     // 2. Get the Page Access Token from the facebook_pages table
-    const { data: fbPage } = await db
+    const { data: fbPage, error: fbErr } = await db
       .from("facebook_pages")
       .select("page_access_token_enc")
       .eq("page_id", igAcc.page_id)
-      // in case there are multiple workspaces sharing the same page, we take the first
       .limit(1)
       .maybeSingle();
 
-    if (!fbPage?.page_access_token_enc) return null;
+    console.log("[ig-token] facebook_pages lookup page_id=", igAcc.page_id,
+      "found=", !!fbPage,
+      "has_token=", !!fbPage?.page_access_token_enc,
+      "db_error=", fbErr?.message ?? "none");
+
+    if (!fbPage?.page_access_token_enc) {
+      console.warn("[ig-token] ⚠️  No facebook_pages row for page_id", igAcc.page_id,
+        "— getIGSenderInfo will NOT run");
+      return null;
+    }
+
+    console.log("[ig-token] ✅ Page access token found for page_id", igAcc.page_id);
     return decryptToken(fbPage.page_access_token_enc);
   } catch (err) {
     console.error("[ig-token-store] getAccessToken error:", err);

@@ -263,20 +263,32 @@ export async function getIGSenderInfo(
   igScopedUserId: string,
   pageAccessToken: string,
 ): Promise<{ name: string | null; profilePic: string | null }> {
+  const fields = "username,name,profile_pic";
+  const tokenSnippet = pageAccessToken.slice(0, 12) + "…"; // log prefix only, never the full token
+  console.log("[ig-sender-info] → GET", `/${igScopedUserId}?fields=${fields}`,
+    "token_prefix=", tokenSnippet);
+
   try {
     const params = new URLSearchParams({
-      fields:       "username,name,profile_pic",
+      fields,
       access_token: pageAccessToken,
     });
-    const data = await graphFetch<{ username?: string; name?: string; profile_pic?: string }>(
+    const data = await graphFetch<{ id?: string; username?: string; name?: string; profile_pic?: string }>(
       `/${igScopedUserId}?${params.toString()}`
     );
-    console.log("[ig-sender-info] API response for", igScopedUserId, "→", JSON.stringify(data));
-    // username is the Instagram handle (@handle); name is the display name — prefer handle
+    console.log("[ig-sender-info] ← raw API response:", JSON.stringify(data));
+
     const resolvedName = data.username ?? data.name ?? null;
+    console.log("[ig-sender-info] resolved name=", resolvedName,
+      "(username=", data.username ?? "MISSING", "name=", data.name ?? "MISSING", ")");
+
     return { name: resolvedName, profilePic: data.profile_pic ?? null };
   } catch (err) {
-    console.warn("[ig-sender-info] API call failed for", igScopedUserId, "→", String(err));
+    // Log the full error object so we can see the exact Meta error code + message
+    const detail = err instanceof Error
+      ? { message: err.message, name: err.name, stack: err.stack?.split("\n")[1] }
+      : String(err);
+    console.error("[ig-sender-info] ❌ API call FAILED for", igScopedUserId, "→", JSON.stringify(detail));
     return { name: null, profilePic: null };
   }
 }

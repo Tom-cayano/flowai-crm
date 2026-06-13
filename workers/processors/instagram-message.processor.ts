@@ -37,6 +37,9 @@ export async function processIGMessage(job: IGMessageJob): Promise<void> {
 
   const { id: accountId, user_id: userId } = account;
 
+  // ── Dump full job so we can see exactly what Meta sent ────────────────
+  console.log("IG JOB", JSON.stringify(job, null, 2));
+
   // ── Resolve sender display name ────────────────────────────────────────
   // Primary: username from the webhook payload (only present in comment events,
   // NOT in DM events — Meta omits it there). Fallback: Graph API lookup.
@@ -57,7 +60,14 @@ export async function processIGMessage(job: IGMessageJob): Promise<void> {
   console.log("[ig-msg] JOB USERNAME resolved →", senderInfo.name);
 
   // ── Idempotency guard ──────────────────────────────────────────────────
-  const alreadyProcessed = await checkAndRecordEvent(db, job.mid, "message", accountId);
+  const alreadyProcessed = await checkAndRecordEvent(db, job.mid, "message", accountId, {
+    senderId:       job.senderId,
+    senderUsername: job.senderUsername,
+    text:           job.text,
+    attachments:    job.attachments,
+    timestamp:      job.timestamp,
+    pageId:         job.pageId,
+  });
   if (alreadyProcessed) {
     console.info(`[ig-msg] Duplicate mid ${job.mid} — skipping`);
     return;
@@ -79,6 +89,15 @@ export async function processIGMessage(job: IGMessageJob): Promise<void> {
     .eq("account_id", accountId)
     .eq("ig_user_id", job.senderId)
     .maybeSingle();
+
+  // ── Dump state before upsertIGContact ────────────────────────────────
+  console.log("IG JOB before upsertIGContact", JSON.stringify({
+    senderId:       job.senderId,
+    senderUsername: job.senderUsername,
+    senderInfoName: senderInfo.name,
+    accountId,
+    userId,
+  }, null, 2));
 
   // ── Upsert Instagram contact ───────────────────────────────────────────
   const igContact = await upsertIGContact(
@@ -201,16 +220,17 @@ async function resolveAccount(db: DB, pageId: string) {
 }
 
 async function checkAndRecordEvent(
-  db:        DB,
-  eventId:   string,
-  eventType: string,
-  accountId: string,
+  db:          DB,
+  eventId:     string,
+  eventType:   string,
+  accountId:   string,
+  rawPayload:  import("@/types/supabase").Json,
 ): Promise<boolean> {
   const { error } = await db.from("instagram_webhook_events").insert({
-    event_id:   eventId,
-    event_type: eventType,
-    account_id: accountId,
-    raw_payload: {},
+    event_id:    eventId,
+    event_type:  eventType,
+    account_id:  accountId,
+    raw_payload: rawPayload,
   });
   // Unique constraint violation = already processed
   return !!error;

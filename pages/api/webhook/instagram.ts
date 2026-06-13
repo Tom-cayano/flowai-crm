@@ -62,17 +62,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           if (!msg.message?.mid) continue;
 
           const job: IGMessageJob = {
-            accountId: "", 
-            userId: "",
-            workspaceId: "",
+            accountId:      "",
+            userId:         "",
+            workspaceId:    "",
             pageId,
-            senderId: msg.sender.id,
-            recipientId: msg.recipient.id,
-            mid: msg.message.mid,
-            text: msg.message.text ?? null,
-            attachments: msg.message.attachments ?? null,
-            timestamp: msg.timestamp,
-            isEcho: msg.message.is_echo === true,
+            senderId:       msg.sender.id,
+            senderUsername: msg.sender.username ?? null,
+            recipientId:    msg.recipient.id,
+            mid:            msg.message.mid,
+            text:           msg.message.text ?? null,
+            attachments:    msg.message.attachments ?? null,
+            timestamp:      msg.timestamp,
+            isEcho:         msg.message.is_echo === true,
             receivedAt,
           };
           await enqueueIGMessage(job);
@@ -137,7 +138,7 @@ interface MetaEntry {
   changes?: MetaChangeEvent[];
 }
 interface MetaMessagingEvent {
-  sender: { id: string };
+  sender: { id: string; username?: string };
   recipient: { id: string };
   timestamp: number;
   message?: {

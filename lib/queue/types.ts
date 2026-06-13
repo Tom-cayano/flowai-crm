@@ -204,8 +204,9 @@ export interface IGMessageJob {
   userId:      string;
   workspaceId: string;
   pageId:      string;   // Facebook Page ID that received the event
-  senderId:    string;   // Instagram-scoped user ID of the sender
-  recipientId: string;   // Page's Instagram-scoped ID
+  senderId:       string;        // Instagram-scoped user ID of the sender
+  senderUsername: string | null; // Instagram handle — present in webhook payload when Meta sends it
+  recipientId:    string;        // Page's Instagram-scoped ID
   mid:         string;   // Meta message ID — idempotency key
   text:        string | null;
   attachments: Array<{

@@ -37,11 +37,18 @@ export async function processIGMessage(job: IGMessageJob): Promise<void> {
 
   const { id: accountId, user_id: userId } = account;
 
-  // ── Fetch sender display name from Meta (best-effort, never blocks) ────
-  const pageToken   = await getAccessToken(accountId);
-  const senderInfo  = pageToken
-    ? await getIGSenderInfo(job.senderId, pageToken)
-    : { name: null, profilePic: null };
+  // ── Resolve sender display name ────────────────────────────────────────
+  // Primary: username arrives in the webhook payload itself (no API call needed).
+  // Fallback: Graph API GET /{igsid}?fields=name — used only when webhook omits it.
+  const webhookUsername = job.senderUsername ?? null;
+  const senderInfo = webhookUsername
+    ? { name: webhookUsername, profilePic: null }
+    : await (async () => {
+        const pageToken = await getAccessToken(accountId);
+        return pageToken
+          ? await getIGSenderInfo(job.senderId, pageToken)
+          : { name: null, profilePic: null };
+      })();
 
   // ── Idempotency guard ──────────────────────────────────────────────────
   const alreadyProcessed = await checkAndRecordEvent(db, job.mid, "message", accountId);

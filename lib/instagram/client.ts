@@ -255,6 +255,29 @@ export async function getIGUser(accessToken: string): Promise<IGUser> {
 }
 
 /**
+ * Fetch display name and profile picture for an Instagram DM sender by IGSID.
+ * Uses the page access token. Returns null fields on any failure (missing
+ * permission, privacy setting, or App Review not yet approved).
+ */
+export async function getIGSenderInfo(
+  igScopedUserId: string,
+  pageAccessToken: string,
+): Promise<{ name: string | null; profilePic: string | null }> {
+  try {
+    const params = new URLSearchParams({
+      fields:       "name,profile_pic",
+      access_token: pageAccessToken,
+    });
+    const data = await graphFetch<{ name?: string; profile_pic?: string }>(
+      `/${igScopedUserId}?${params.toString()}`
+    );
+    return { name: data.name ?? null, profilePic: data.profile_pic ?? null };
+  } catch {
+    return { name: null, profilePic: null };
+  }
+}
+
+/**
  * List Facebook Pages the token has access to, including linked Instagram
  * Business Account IDs.
  * Requires pages_show_list permission.

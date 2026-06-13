@@ -13,6 +13,8 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { enqueueAutomation, enqueueIGMedia } from "@/lib/queue/producers";
+import { getAccessToken } from "@/lib/instagram/token-store";
+import { getIGSenderInfo } from "@/lib/instagram/client";
 import type { IGMessageJob } from "@/lib/queue/types";
 
 type DB = ReturnType<typeof createAdminClient>;
@@ -34,6 +36,12 @@ export async function processIGMessage(job: IGMessageJob): Promise<void> {
   }
 
   const { id: accountId, user_id: userId } = account;
+
+  // ── Fetch sender display name from Meta (best-effort, never blocks) ────
+  const pageToken   = await getAccessToken(accountId);
+  const senderInfo  = pageToken
+    ? await getIGSenderInfo(job.senderId, pageToken)
+    : { name: null, profilePic: null };
 
   // ── Idempotency guard ──────────────────────────────────────────────────
   const alreadyProcessed = await checkAndRecordEvent(db, job.mid, "message", accountId);
@@ -60,13 +68,20 @@ export async function processIGMessage(job: IGMessageJob): Promise<void> {
     .maybeSingle();
 
   // ── Upsert Instagram contact ───────────────────────────────────────────
-  const igContact = await upsertIGContact(db, accountId, userId, job.senderId);
+  const igContact = await upsertIGContact(
+    db, accountId, userId, job.senderId,
+    senderInfo.name, senderInfo.profilePic,
+  );
 
   // ── Upsert CRM contact ────────────────────────────────────────────────
-  const crmContactId = await upsertCrmContact(db, userId, job.senderId, igContact?.ig_username ?? null);
+  const senderDisplayName = igContact?.ig_username ?? senderInfo.name ?? null;
+  const crmContactId = await upsertCrmContact(db, userId, job.senderId, senderDisplayName);
 
   // ── Upsert CRM conversation ───────────────────────────────────────────
-  const crmConv = await upsertCrmConversation(db, userId, crmContactId, job.senderId);
+  const contactDisplayName = senderDisplayName
+    ? (senderDisplayName.startsWith("@") ? senderDisplayName : `@${senderDisplayName}`)
+    : `ig:${job.senderId}`;
+  const crmConv = await upsertCrmConversation(db, userId, crmContactId, job.senderId, contactDisplayName);
   if (!crmConv) {
     console.error("[ig-msg] Failed to upsert CRM conversation — dropping");
     return;
@@ -95,12 +110,21 @@ export async function processIGMessage(job: IGMessageJob): Promise<void> {
   });
 
   // ── Mirror to CRM messages ─────────────────────────────────────────────
+  // DB enum for messages.type: "text"|"image"|"audio"|"document"|"template"
+  const crmMsgType = ((): "text" | "image" | "audio" | "document" => {
+    if (messageType === "audio")    return "audio";
+    if (messageType === "document") return "document";
+    if (messageType === "text")     return "text";
+    return "image"; // image, video, share, story_mention → rendered as image with URL
+  })();
+
   const { data: crmMsg } = await db.from("messages").insert({
     conversation_id: crmConv.id,
     content:         text || (hasAttachment ? `[${messageType}]` : ""),
-    type:            messageType === "text" ? "text" : "image",
+    type:            crmMsgType,
     sender:          "contact",
     status:          "delivered",
+    media_url:       mediaUrl || null,
   }).select("id").single();
 
   // Track the CRM message id on the instagram_messages row for cross-ref
@@ -184,20 +208,36 @@ async function upsertIGContact(
   accountId:   string,
   userId:      string,
   igUserId:    string,
+  senderName:  string | null,
+  avatarUrl:   string | null,
 ) {
   const { data } = await db
     .from("instagram_contacts")
     .upsert(
       {
-        account_id:  accountId,
-        user_id:     userId,
-        ig_user_id:  igUserId,
+        account_id:   accountId,
+        user_id:      userId,
+        ig_user_id:   igUserId,
         last_seen_at: new Date().toISOString(),
       },
       { onConflict: "account_id,ig_user_id" }
     )
-    .select("id, ig_username")
+    .select("id, ig_username, avatar_url")
     .single();
+
+  // Populate name/avatar only when Meta returned them and DB row still has nulls,
+  // so we never overwrite a good value with a failed-fetch null.
+  if (data && senderName && !data.ig_username) {
+    await db
+      .from("instagram_contacts")
+      .update({
+        ig_username: senderName,
+        ...(avatarUrl ? { avatar_url: avatarUrl } : {}),
+      })
+      .eq("id", data.id);
+    data.ig_username = senderName;
+  }
+
   return data;
 }
 
@@ -228,15 +268,16 @@ async function upsertCrmContact(
 }
 
 async function upsertCrmConversation(
-  db:        DB,
-  userId:    string,
-  contactId: string | null,
-  igUserId:  string,
+  db:          DB,
+  userId:      string,
+  contactId:   string | null,
+  igUserId:    string,
+  displayName: string,
 ) {
   const selectOpenConversation = () =>
     db
       .from("conversations")
-      .select("id, unread_count")
+      .select("id, unread_count, contact_name")
       .eq("user_id", userId)
       .eq("contact_phone", igUserId)
       .eq("channel", "instagram")
@@ -244,14 +285,23 @@ async function upsertCrmConversation(
       .maybeSingle();
 
   const { data: existing } = await selectOpenConversation();
-  if (existing) return existing;
+  if (existing) {
+    // Backfill contact_name if it was previously stored as raw ig:userId
+    if (existing.contact_name?.startsWith("ig:") && !displayName.startsWith("ig:")) {
+      await db
+        .from("conversations")
+        .update({ contact_name: displayName })
+        .eq("id", existing.id);
+    }
+    return existing;
+  }
 
   const { data: created, error } = await db
     .from("conversations")
     .insert({
       user_id:       userId,
       contact_id:    contactId,
-      contact_name:  `ig:${igUserId}`,
+      contact_name:  displayName,
       contact_phone: igUserId,
       channel:       "instagram",
       status:        "open",

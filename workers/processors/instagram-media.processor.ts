@@ -39,5 +39,19 @@ export async function processIGMedia(job: IGMediaJob): Promise<void> {
     .update({ media_url: publicUrl })
     .eq("id", job.messageId);
 
+  // Mirror permanent URL to the CRM messages table so the UI can render it.
+  // instagram_messages.external_id holds the messages.id cross-reference.
+  const { data: igMsg } = await db
+    .from("instagram_messages")
+    .select("external_id")
+    .eq("id", job.messageId)
+    .single();
+
+  if (igMsg?.external_id) {
+    await db.from("messages")
+      .update({ media_url: publicUrl })
+      .eq("id", igMsg.external_id);
+  }
+
   console.info(`[ig-media] Stored ${job.mediaType} → ${publicUrl}`);
 }

@@ -255,9 +255,9 @@ export async function getIGUser(accessToken: string): Promise<IGUser> {
 }
 
 /**
- * Fetch display name and profile picture for an Instagram DM sender by IGSID.
- * Uses the page access token. Returns null fields on any failure (missing
- * permission, privacy setting, or App Review not yet approved).
+ * Fetch username, display name and profile picture for an Instagram DM sender
+ * by IGSID. Uses the page access token. Returns null fields on any failure.
+ * Prefers the Instagram handle (username) over the display name (name).
  */
 export async function getIGSenderInfo(
   igScopedUserId: string,
@@ -265,14 +265,18 @@ export async function getIGSenderInfo(
 ): Promise<{ name: string | null; profilePic: string | null }> {
   try {
     const params = new URLSearchParams({
-      fields:       "name,profile_pic",
+      fields:       "username,name,profile_pic",
       access_token: pageAccessToken,
     });
-    const data = await graphFetch<{ name?: string; profile_pic?: string }>(
+    const data = await graphFetch<{ username?: string; name?: string; profile_pic?: string }>(
       `/${igScopedUserId}?${params.toString()}`
     );
-    return { name: data.name ?? null, profilePic: data.profile_pic ?? null };
-  } catch {
+    console.log("[ig-sender-info] API response for", igScopedUserId, "→", JSON.stringify(data));
+    // username is the Instagram handle (@handle); name is the display name — prefer handle
+    const resolvedName = data.username ?? data.name ?? null;
+    return { name: resolvedName, profilePic: data.profile_pic ?? null };
+  } catch (err) {
+    console.warn("[ig-sender-info] API call failed for", igScopedUserId, "→", String(err));
     return { name: null, profilePic: null };
   }
 }

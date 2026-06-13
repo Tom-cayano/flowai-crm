@@ -38,17 +38,23 @@ export async function processIGMessage(job: IGMessageJob): Promise<void> {
   const { id: accountId, user_id: userId } = account;
 
   // ── Resolve sender display name ────────────────────────────────────────
-  // Primary: username arrives in the webhook payload itself (no API call needed).
-  // Fallback: Graph API GET /{igsid}?fields=name — used only when webhook omits it.
+  // Primary: username from the webhook payload (only present in comment events,
+  // NOT in DM events — Meta omits it there). Fallback: Graph API lookup.
   const webhookUsername = job.senderUsername ?? null;
+  console.log("[ig-msg] WEBHOOK USERNAME", webhookUsername, "senderId", job.senderId);
+
   const senderInfo = webhookUsername
     ? { name: webhookUsername, profilePic: null }
     : await (async () => {
         const pageToken = await getAccessToken(accountId);
-        return pageToken
-          ? await getIGSenderInfo(job.senderId, pageToken)
-          : { name: null, profilePic: null };
+        if (!pageToken) {
+          console.warn("[ig-msg] No page token for accountId", accountId, "— cannot fetch sender info");
+          return { name: null, profilePic: null };
+        }
+        return await getIGSenderInfo(job.senderId, pageToken);
       })();
+
+  console.log("[ig-msg] JOB USERNAME resolved →", senderInfo.name);
 
   // ── Idempotency guard ──────────────────────────────────────────────────
   const alreadyProcessed = await checkAndRecordEvent(db, job.mid, "message", accountId);
@@ -234,15 +240,24 @@ async function upsertIGContact(
 
   // Populate name/avatar only when Meta returned them and DB row still has nulls,
   // so we never overwrite a good value with a failed-fetch null.
+  console.log("[ig-msg] UPSERT USERNAME senderName=", senderName, "existing ig_username=", data?.ig_username);
+
   if (data && senderName && !data.ig_username) {
-    await db
+    const { error: updateErr } = await db
       .from("instagram_contacts")
       .update({
         ig_username: senderName,
         ...(avatarUrl ? { avatar_url: avatarUrl } : {}),
       })
       .eq("id", data.id);
-    data.ig_username = senderName;
+    if (updateErr) {
+      console.error("[ig-msg] Failed to update ig_username:", updateErr.message);
+    } else {
+      data.ig_username = senderName;
+      console.log("[ig-msg] ig_username saved →", senderName);
+    }
+  } else if (!senderName) {
+    console.warn("[ig-msg] senderName is null — ig_username will NOT be set");
   }
 
   return data;

@@ -258,15 +258,25 @@ export async function getIGUser(accessToken: string): Promise<IGUser> {
  * Fetch username, display name and profile picture for an Instagram DM sender
  * by IGSID. Uses the page access token. Returns null fields on any failure.
  * Prefers the Instagram handle (username) over the display name (name).
+ *
+ * Common failure reasons:
+ *   code=10  / type=OAuthException  → missing instagram_business_basic scope (App Review pending)
+ *   code=200 / type=OAuthException  → insufficient permissions
+ *   code=190 / type=OAuthException  → invalid/expired token
+ *   code=100 / type=GraphMethodException → user not found or not linked to page
  */
 export async function getIGSenderInfo(
   igScopedUserId: string,
   pageAccessToken: string,
 ): Promise<{ name: string | null; profilePic: string | null }> {
   const fields = "username,name,profile_pic";
-  const tokenSnippet = pageAccessToken.slice(0, 12) + "…"; // log prefix only, never the full token
-  console.log("[ig-sender-info] → GET", `/${igScopedUserId}?fields=${fields}`,
-    "token_prefix=", tokenSnippet);
+  const tokenSnippet = pageAccessToken.slice(0, 12) + "…";
+  console.log(
+    "[ig-sender-info] → GET",
+    `/${igScopedUserId}?fields=${fields}`,
+    "token_prefix=", tokenSnippet,
+    "igsid=", igScopedUserId,
+  );
 
   try {
     const params = new URLSearchParams({
@@ -279,16 +289,44 @@ export async function getIGSenderInfo(
     console.log("[ig-sender-info] ← raw API response:", JSON.stringify(data));
 
     const resolvedName = data.username ?? data.name ?? null;
-    console.log("[ig-sender-info] resolved name=", resolvedName,
-      "(username=", data.username ?? "MISSING", "name=", data.name ?? "MISSING", ")");
+    console.log(
+      "[ig-sender-info] ✅ resolved name=", resolvedName,
+      "(username=", data.username ?? "MISSING",
+      "name=", data.name ?? "MISSING", ")",
+    );
 
     return { name: resolvedName, profilePic: data.profile_pic ?? null };
   } catch (err) {
-    // Log the full error object so we can see the exact Meta error code + message
-    const detail = err instanceof Error
-      ? { message: err.message, name: err.name, stack: err.stack?.split("\n")[1] }
-      : String(err);
-    console.error("[ig-sender-info] ❌ API call FAILED for", igScopedUserId, "→", JSON.stringify(detail));
+    // Log ALL available error fields so the root cause is immediately visible in logs
+    if (err instanceof IGApiError) {
+      console.error(
+        "[ig-sender-info] ❌ Meta Graph API error for IGSID", igScopedUserId,
+        "\n  message  :", err.message,
+        "\n  code     :", err.code,
+        "\n  type     :", err.type,
+        "\n  httpStatus:", err.httpStatus,
+        "\n  isTokenError  :", err.isTokenError,
+        "\n  isRateLimited :", err.isRateLimited,
+        "\n  isScopeError  :", err.isScopeError,
+      );
+      if (err.isScopeError) {
+        console.error(
+          "[ig-sender-info] ⚠️  SCOPE ERROR — instagram_business_basic permission is missing or under App Review.\n" +
+          "  → This is a Meta-side restriction. Username CANNOT be fetched until Meta approves the app.\n" +
+          "  → Conversation will show ig:" + igScopedUserId + " until resolved."
+        );
+      } else if (err.isTokenError) {
+        console.error(
+          "[ig-sender-info] ⚠️  TOKEN ERROR — page access token is invalid or expired.\n" +
+          "  → Re-connect Instagram account to refresh the token."
+        );
+      }
+    } else {
+      const detail = err instanceof Error
+        ? { message: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 3).join(" | ") }
+        : String(err);
+      console.error("[ig-sender-info] ❌ Unexpected error for IGSID", igScopedUserId, "→", JSON.stringify(detail));
+    }
     return { name: null, profilePic: null };
   }
 }

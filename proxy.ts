@@ -30,6 +30,7 @@ const PUBLIC_PATHS = [
 // Prefijos que siempre se dejan pasar (APIs públicas, webhooks, assets)
 const BYPASS_PREFIXES = [
   "/api/webhook/",       // Evolution API, Meta, etc. — no tienen sesión
+  "/api/webhooks/",      // Webhook universal de integraciones — usa Bearer token
   "/api/billing/webhooks", // Stripe webhook — usa firma, no sesión
   "/api/ops",            // health checks internos
   "/_next/",

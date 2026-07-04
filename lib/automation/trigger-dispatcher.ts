@@ -235,6 +235,71 @@ export async function dispatchNoResponseTimeout(opts: {
   );
 }
 
+export async function dispatchWebhookLead(opts: {
+  userId:      string;
+  contactId:   string;
+  phone:       string;
+  source:      string;
+  event:       string;
+  contactName: string;
+  customData:  Record<string, unknown>;
+}): Promise<void> {
+  const db    = createAdminClient();
+  const creds = await resolveInstanceCredentials(opts.userId);
+
+  // Reuse the contact's latest conversation when one exists so actions like
+  // send_message / change_status have a target. Leads without prior contact
+  // start with conversationId null (send actions may open a new conversation).
+  const { data: conv } = await db
+    .from("conversations")
+    .select("id")
+    .eq("user_id", opts.userId)
+    .eq("contact_id", opts.contactId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  // Flatten custom_data into engine variables: webhook.data.<key>
+  const dataVars: Record<string, string | number | boolean> = {};
+  for (const [key, value] of Object.entries(opts.customData ?? {})) {
+    if (
+      typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "boolean"
+    ) {
+      dataVars[`webhook.data.${key}`] = value;
+    } else if (value !== null && value !== undefined) {
+      dataVars[`webhook.data.${key}`] = JSON.stringify(value);
+    }
+  }
+
+  const ctx: ExecutionContext = {
+    executionId:    "",
+    automationId:   "",
+    userId:         opts.userId,
+    conversationId: conv?.id ?? null,
+    contactId:      opts.contactId,
+    phone:          opts.phone,
+    instanceName:   creds.instanceName,
+    serverUrl:      creds.serverUrl,
+    instanceApiKey: creds.apiKey,
+    incomingText:   "",
+    isFirstMessage: false,
+    triggerType:    "webhook_lead",
+    variables: {
+      "webhook.source": opts.source,
+      "webhook.event":  opts.event,
+      "contact.name":   opts.contactName,
+      "contact.phone":  opts.phone,
+      ...dataVars,
+    },
+  };
+
+  await runMatchingAutomations(ctx).catch((e: unknown) =>
+    console.error("[trigger-dispatcher] dispatchWebhookLead:", e)
+  );
+}
+
 export async function dispatchScheduledCron(opts: {
   userId:       string;
   automationId: string;

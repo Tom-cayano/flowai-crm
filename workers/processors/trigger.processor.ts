@@ -11,6 +11,7 @@ import {
   dispatchConversationCreated,
   dispatchNoResponseTimeout,
   dispatchScheduledCron,
+  dispatchWebhookLead,
 } from "@/lib/automation/trigger-dispatcher";
 import type { TriggerJob } from "@/lib/queue/types";
 
@@ -95,6 +96,26 @@ export async function processTrigger(job: TriggerJob): Promise<void> {
           userId:         job.userId,
           conversationId: job.conversationId,
           waitedMinutes:  m.waitedMinutes ?? 0,
+        });
+        break;
+      }
+
+      case "webhook_lead": {
+        const m = job.meta as {
+          source:      string;
+          event:       string;
+          contactName: string;
+          customData:  Record<string, unknown>;
+        };
+        if (!job.contactId) break;
+        await dispatchWebhookLead({
+          userId:      job.userId,
+          contactId:   job.contactId,
+          phone:       job.phone,
+          source:      m.source ?? "",
+          event:       m.event  ?? "",
+          contactName: m.contactName ?? "",
+          customData:  m.customData ?? {},
         });
         break;
       }

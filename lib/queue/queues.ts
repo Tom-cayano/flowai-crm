@@ -25,6 +25,7 @@ import type {
   FBOutboundJob,
   WACMessageJob,
   WACOutboundJob,
+  LeadWebhookJob,
 } from "./types";
 
 // ─── Default job options ──────────────────────────────────────────────────────
@@ -67,6 +68,9 @@ let fbmOutboundQueue: Queue<FBOutboundJob> | null = null;
 let wacMessageQueue:  Queue<WACMessageJob>  | null = null;
 let wacOutboundQueue: Queue<WACOutboundJob> | null = null;
 
+// ─── Universal webhook singleton ──────────────────────────────────────────────
+let leadWebhookQueue: Queue<LeadWebhookJob> | null = null;
+
 function conn() {
   return { connection: getProducerRedis() };
 }
@@ -93,5 +97,7 @@ export function getFBMOutboundQueue(): Queue<FBOutboundJob> { return (fbmOutboun
 
 export function getWACMessageQueue():  Queue<WACMessageJob>  { return (wacMessageQueue  ??= new Queue(QUEUE_NAMES.WAC_MESSAGE,  conn())); }
 export function getWACOutboundQueue(): Queue<WACOutboundJob> { return (wacOutboundQueue ??= new Queue(QUEUE_NAMES.WAC_OUTBOUND, conn())); }
+
+export function getLeadWebhookQueue(): Queue<LeadWebhookJob> { return (leadWebhookQueue ??= new Queue(QUEUE_NAMES.LEAD_WEBHOOK, conn())); }
 
 export { BASE_JOB_OPTIONS, RETRY_OPTIONS };

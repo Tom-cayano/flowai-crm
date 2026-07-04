@@ -18,6 +18,7 @@ export type TriggerType =
   | "business_hours_start"
   | "business_hours_end"
   | "scheduled_cron"          // cron expression
+  | "webhook_lead"            // universal webhook (/api/webhooks/leads) event
   // ─── Instagram triggers ──────────────────────────────────────────────────
   | "instagram_dm_received"       // any inbound Instagram DM
   | "instagram_comment_received"  // comment on a post/reel/story
@@ -43,6 +44,9 @@ export interface TriggerConfig {
   // scheduled_cron
   cronExpression?: string;
   timezone?: string;
+  // webhook_lead — filter by external app / event ("" or undefined = any)
+  webhookSource?: string;
+  webhookEvent?: string;
   // filter by channel
   channel?: "whatsapp" | "instagram" | "messenger" | "email" | "sms" | "any";
   // instagram_comment_received — filter by media type

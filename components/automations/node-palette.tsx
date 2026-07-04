@@ -31,6 +31,7 @@ const TRIGGER_ITEMS: PaletteItem[] = [
   { type: "trigger", subtype: "no_response_timeout",        label: "Sin respuesta",              description: "Sin respuesta del agente en N minutos",  icon: Clock,        color: "text-[#10b981]" },
   { type: "trigger", subtype: "lead_score_threshold",       label: "Lead score umbral",          description: "El score supera un valor",               icon: TrendingUp,   color: "text-[#10b981]" },
   { type: "trigger", subtype: "scheduled_cron",             label: "Programado (cron)",          description: "Ejecuta según expresión cron",           icon: Clock,        color: "text-[#10b981]" },
+  { type: "trigger", subtype: "webhook_lead",               label: "Webhook entrante",           description: "Lead desde una app externa conectada",   icon: Webhook,      color: "text-sky-400" },
   // Instagram
   { type: "trigger", subtype: "instagram_dm_received",      label: "IG · DM recibido",           description: "Mensaje directo de Instagram",            icon: MessageCircle, color: "text-purple-400" },
   { type: "trigger", subtype: "instagram_comment_received", label: "IG · Comentario recibido",   description: "Comentario en publicación o reel",        icon: MessageCircle, color: "text-purple-400" },

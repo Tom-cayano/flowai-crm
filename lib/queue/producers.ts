@@ -21,6 +21,7 @@ import {
   getFBMOutboundQueue,
   getWACMessageQueue,
   getWACOutboundQueue,
+  getLeadWebhookQueue,
   BASE_JOB_OPTIONS,
   RETRY_OPTIONS,
 } from "./queues";
@@ -44,6 +45,7 @@ import type {
   FBOutboundJob,
   WACMessageJob,
   WACOutboundJob,
+  LeadWebhookJob,
 } from "./types";
 
 export async function enqueueMessage(job: MessageJob): Promise<string> {
@@ -245,6 +247,25 @@ export async function enqueueWACMessage(job: WACMessageJob): Promise<string> {
     ...RETRY_OPTIONS,
     // Deduplicate: same wamid must never be processed twice
     jobId: `wac-${job.wamid}`,
+  });
+  return result.id ?? "";
+}
+
+// ─── Universal webhook producers ──────────────────────────────────────────────
+
+/**
+ * Retry a failed lead webhook event with exponential backoff.
+ * 5 attempts: ~30 s, 1 m, 2 m, 4 m, 8 m — a lead is never silently dropped;
+ * after the last attempt the event row stays "failed" and is visible in the
+ * Integraciones panel for manual replay.
+ */
+export async function enqueueLeadWebhookRetry(job: LeadWebhookJob): Promise<string> {
+  const q = getLeadWebhookQueue();
+  const result = await q.add("process", job, {
+    ...BASE_JOB_OPTIONS,
+    attempts: 5,
+    backoff: { type: "exponential", delay: 30_000 },
+    jobId: `lead-evt-${job.eventId}`,
   });
   return result.id ?? "";
 }

@@ -17,6 +17,7 @@ import {
   Store,
   CreditCard,
   UserCog,
+  Webhook,
 } from "lucide-react";
 
 // Instagram brand icon (lucide-react doesn't include it)
@@ -53,12 +54,13 @@ const navItems = [
   { href: "/messenger",   label: "Messenger",        icon: MessengerIcon },
   { href: "/campaigns",    label: "Campañas",         icon: Megaphone },
   { href: "/automations",  label: "Automatizaciones", icon: Zap },
+  { href: "/integrations", label: "Integraciones",    icon: Webhook },
   { href: "/marketplace",  label: "Marketplace",      icon: Store },
   { href: "/ops",          label: "Operaciones",      icon: Activity },
 ];
 
 const bottomItems = [
-  { href: "/settings/integrations/meta", label: "Integraciones",   icon: Zap },
+  { href: "/settings/integrations/meta", label: "Conexión Meta",    icon: Zap },
   { href: "/settings/channels",          label: "Canales",          icon: Smartphone },
   { href: "/settings/team",              label: "Equipo",           icon: UserCog },
   { href: "/settings/billing",           label: "Facturación",      icon: CreditCard },

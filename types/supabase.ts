@@ -79,6 +79,8 @@ export interface Database {
           notes: string | null;
           status: "active" | "inactive" | "blocked";
           tags: string[];
+          source: string | null;
+          custom_fields: Json;
           last_interaction: string | null;
           created_at: string;
           updated_at: string;
@@ -96,6 +98,8 @@ export interface Database {
           notes?: string | null;
           status?: "active" | "inactive" | "blocked";
           tags?: string[];
+          source?: string | null;
+          custom_fields?: Json;
           last_interaction?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -111,6 +115,8 @@ export interface Database {
           notes?: string | null;
           status?: "active" | "inactive" | "blocked";
           tags?: string[];
+          source?: string | null;
+          custom_fields?: Json;
           last_interaction?: string | null;
           updated_at?: string;
         };
@@ -986,6 +992,131 @@ export interface Database {
           actions?: Json;
           priority?: number;
           updated_at?: string;
+        };
+        Relationships: [];
+      };
+      webhook_integrations: {
+        Row: {
+          id: string;
+          user_id: string;
+          name: string;
+          source_key: string;
+          token: string;
+          hmac_secret: string | null;
+          enabled: boolean;
+          default_tags: string[];
+          total_events: number;
+          total_errors: number;
+          last_event_at: string | null;
+          last_event_status: string | null;
+          last_error: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          name: string;
+          source_key: string;
+          token: string;
+          hmac_secret?: string | null;
+          enabled?: boolean;
+          default_tags?: string[];
+          total_events?: number;
+          total_errors?: number;
+          last_event_at?: string | null;
+          last_event_status?: string | null;
+          last_error?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          name?: string;
+          source_key?: string;
+          token?: string;
+          hmac_secret?: string | null;
+          enabled?: boolean;
+          default_tags?: string[];
+          total_events?: number;
+          total_errors?: number;
+          last_event_at?: string | null;
+          last_event_status?: string | null;
+          last_error?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      integration_events: {
+        Row: {
+          id: string;
+          integration_id: string;
+          user_id: string;
+          source: string;
+          event: string;
+          payload: Json;
+          idempotency_key: string | null;
+          status: "received" | "processed" | "failed" | "retrying" | "dead";
+          error: string | null;
+          attempts: number;
+          contact_id: string | null;
+          contact_created: boolean;
+          automations_triggered: Json;
+          processing_ms: number | null;
+          created_at: string;
+          processed_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          integration_id: string;
+          user_id: string;
+          source: string;
+          event: string;
+          payload?: Json;
+          idempotency_key?: string | null;
+          status?: "received" | "processed" | "failed" | "retrying" | "dead";
+          error?: string | null;
+          attempts?: number;
+          contact_id?: string | null;
+          contact_created?: boolean;
+          automations_triggered?: Json;
+          processing_ms?: number | null;
+          created_at?: string;
+          processed_at?: string | null;
+        };
+        Update: {
+          status?: "received" | "processed" | "failed" | "retrying" | "dead";
+          error?: string | null;
+          attempts?: number;
+          contact_id?: string | null;
+          contact_created?: boolean;
+          automations_triggered?: Json;
+          processing_ms?: number | null;
+          processed_at?: string | null;
+        };
+        Relationships: [];
+      };
+      integration_security_events: {
+        Row: {
+          id: string;
+          integration_id: string | null;
+          user_id: string | null;
+          ip: string | null;
+          reason: string;
+          detail: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          integration_id?: string | null;
+          user_id?: string | null;
+          ip?: string | null;
+          reason: string;
+          detail?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          reason?: string;
+          detail?: string | null;
         };
         Relationships: [];
       };

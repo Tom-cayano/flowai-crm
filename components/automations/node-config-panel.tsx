@@ -78,6 +78,7 @@ const TRIGGER_OPTIONS: { value: TriggerType; label: string }[] = [
   { value: "no_response_timeout",         label: "Sin respuesta (timeout)" },
   { value: "lead_score_threshold",        label: "Lead score umbral" },
   { value: "scheduled_cron",              label: "Programado (cron)" },
+  { value: "webhook_lead",                label: "Webhook entrante (app externa)" },
   // Instagram
   { value: "instagram_dm_received",       label: "IG · DM recibido" },
   { value: "instagram_comment_received",  label: "IG · Comentario recibido" },
@@ -217,6 +218,31 @@ function TriggerConfig({
             className="h-8 text-xs font-mono"
           />
         </Field>
+      )}
+
+      {cfg.type === "webhook_lead" && (
+        <>
+          <Field label="Source (vacío = cualquier app)">
+            <Input
+              value={cfg.webhookSource ?? ""}
+              onChange={(e) => update({ webhookSource: e.target.value })}
+              placeholder="ej: transforma-fit-coach"
+              className="h-8 text-xs font-mono"
+            />
+          </Field>
+          <Field label="Evento (vacío = cualquier evento)">
+            <Input
+              value={cfg.webhookEvent ?? ""}
+              onChange={(e) => update({ webhookEvent: e.target.value })}
+              placeholder="ej: lead_created"
+              className="h-8 text-xs font-mono"
+            />
+          </Field>
+          <p className="text-[11px] text-muted-foreground leading-relaxed">
+            Se dispara cuando una aplicación conectada en Integraciones envía un
+            webhook. El source y el evento llegan en el payload del POST.
+          </p>
+        </>
       )}
     </div>
   );

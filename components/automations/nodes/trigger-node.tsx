@@ -2,7 +2,7 @@
 
 import { memo } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { Zap, MessageSquare, Clock, Tag, User, Hash } from "lucide-react";
+import { Zap, MessageSquare, Clock, Tag, User, Hash, Webhook } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { TriggerNodeData } from "@/types/automation";
 
@@ -18,6 +18,7 @@ const TRIGGER_ICONS: Record<string, React.ElementType> = {
   no_response_timeout:       Clock,
   scheduled_cron:            Clock,
   lead_score_threshold:      Zap,
+  webhook_lead:              Webhook,
   default:                   Zap,
 };
 
@@ -33,6 +34,7 @@ const TRIGGER_LABELS: Record<string, string> = {
   no_response_timeout:       "Sin respuesta",
   scheduled_cron:            "Programado",
   lead_score_threshold:      "Lead score",
+  webhook_lead:              "Webhook entrante",
 };
 
 export const TriggerNode = memo(function TriggerNode({

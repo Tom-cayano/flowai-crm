@@ -24,6 +24,7 @@ const pageTitles: Record<string, { title: string; description: string }> = {
   "/contacts":     { title: "Contactos",        description: "Tu base de datos de contactos" },
   "/campaigns":    { title: "Campañas",         description: "Difusión y alcance de audiencias" },
   "/automations":  { title: "Automatizaciones", description: "Flujos de trabajo automatizados" },
+  "/integrations": { title: "Integraciones",    description: "Aplicaciones conectadas por webhook" },
   "/marketplace":  { title: "Marketplace",      description: "Plantillas y extensiones" },
   "/ops":          { title: "Operaciones",      description: "Salud del sistema y colas" },
   "/settings":     { title: "Configuración",    description: "Configura tu espacio de trabajo" },

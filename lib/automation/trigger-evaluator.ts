@@ -28,6 +28,14 @@ export function evaluateTrigger(
       }
     }
 
+    case "webhook_lead": {
+      if (ctx.triggerType !== "webhook_lead") return false;
+      // Optional source/event filters — set as variables by the dispatcher
+      if (trigger.webhookSource && trigger.webhookSource !== ctx.variables["webhook.source"]) return false;
+      if (trigger.webhookEvent  && trigger.webhookEvent  !== ctx.variables["webhook.event"])  return false;
+      return true;
+    }
+
     // These trigger types are evaluated at the point of the external event —
     // the webhook / background job already knows they matched.
     case "conversation_created":

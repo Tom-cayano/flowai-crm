@@ -66,6 +66,7 @@ const TRIGGER_LABEL: Record<string, string> = {
   no_response_timeout:         "Sin respuesta",
   scheduled_cron:              "Programado",
   lead_score_threshold:        "Lead score",
+  webhook_lead:                "Webhook entrante",
   business_hours_start:        "Inicio jornada",
   business_hours_end:          "Fin jornada",
   // Instagram

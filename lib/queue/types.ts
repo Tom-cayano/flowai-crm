@@ -33,6 +33,8 @@ export const QUEUE_NAMES = {
   // ─── WhatsApp Cloud API (direct, not Evolution) ────────────────────────
   WAC_MESSAGE:    "wac-message",    // Inbound Cloud API message pipeline
   WAC_OUTBOUND:   "wac-outbound",   // Outbound Cloud API message sending
+  // ─── Universal webhooks (external apps → /api/webhooks/leads) ──────────
+  LEAD_WEBHOOK:   "lead-webhook",   // Retry queue for failed lead events
 } as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];
@@ -101,7 +103,7 @@ export interface AutomationJob {
 export interface TriggerJob {
   type: "status_changed" | "tag_added" | "tag_removed" | "contact_created"
       | "no_response_timeout" | "lead_score_threshold" | "scheduled_cron"
-      | "conversation_created";
+      | "conversation_created" | "webhook_lead";
   userId:         string;
   conversationId: string | null;
   contactId:      string | null;
@@ -351,6 +353,18 @@ export interface WACOutboundJob {
   origin:         "automation" | "manual" | "ai_reply" | "campaign";
   templateName?:  string;   // set when type = "template"
   languageCode?:  string;   // e.g. "es" — required with templateName
+}
+
+// ─── Universal webhook job payloads ──────────────────────────────────────────
+
+/**
+ * Retry job for a lead webhook event that failed inline processing.
+ * The full payload lives in the integration_events row — the job only
+ * carries the event id, so retries always see the latest DB state.
+ */
+export interface LeadWebhookJob {
+  eventId: string;
+  userId:  string;
 }
 
 // ─── Job result shapes ────────────────────────────────────────────────────────

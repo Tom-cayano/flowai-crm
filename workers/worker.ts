@@ -53,6 +53,7 @@ import { processMessengerMessage }  from "./processors/messenger-message.process
 import { processMessengerOutbound } from "./processors/messenger-outbound.processor";
 import { processWACMessage }        from "./processors/whatsapp-cloud-message.processor";
 import { processWACOutbound }       from "./processors/whatsapp-cloud-outbound.processor";
+import { processLeadWebhook }       from "./processors/lead-webhook.processor";
 
 import type {
   MessageJob, StatusJob, MediaJob, AutomationJob,
@@ -60,6 +61,7 @@ import type {
   IGMessageJob, IGOutboundJob, IGCommentJob, IGMediaJob, IGTokenJob,
   FBMessageJob, FBOutboundJob,
   WACMessageJob, WACOutboundJob,
+  LeadWebhookJob,
 } from "@/lib/queue/types";
 
 // ─── Identity ─────────────────────────────────────────────────────────────────
@@ -93,6 +95,8 @@ const CONCURRENCY = {
   // WhatsApp Cloud API — keep outbound low (rate limits per WABA)
   wacMessage:  Number(process.env.WORKER_CONCURRENCY_WAC_MESSAGE  ?? 5),
   wacOutbound: Number(process.env.WORKER_CONCURRENCY_WAC_OUTBOUND ?? 2),
+  // Universal webhooks — retry queue for failed lead events
+  leadWebhook: Number(process.env.WORKER_CONCURRENCY_LEAD_WEBHOOK ?? 3),
 };
 
 // ─── Worker factory ───────────────────────────────────────────────────────────
@@ -298,6 +302,8 @@ async function start(): Promise<void> {
     createWorker<OutboundJob>  (QUEUE_NAMES.WPP_OUTBOUND,   (j) => processOutbound(j.data),   CONCURRENCY.outbound),
     createWorker<ConnectionJob>(QUEUE_NAMES.WPP_CONNECTION, (j) => processConnection(j.data), CONCURRENCY.connection),
     createWorker<AIJob>        (QUEUE_NAMES.WPP_AI,         (j) => processAI(j.data),         CONCURRENCY.ai),
+    // ── Universal webhooks retry (always on — leads must never be lost) ──────
+    createWorker<LeadWebhookJob>(QUEUE_NAMES.LEAD_WEBHOOK,  (j) => processLeadWebhook(j),     CONCURRENCY.leadWebhook),
     // ── Optional: session / scheduled / trigger (off by default) ─────────────
     ...(process.env.WORKER_ENABLE_SESSION   === "true"
       ? [createWorker<SessionJob>  (QUEUE_NAMES.WPP_SESSION,   (j) => processSession(j.data),   CONCURRENCY.session)]   : []),

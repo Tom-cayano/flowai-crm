@@ -204,7 +204,7 @@ export async function resumeOverdueScheduledTasks(): Promise<void> {
 
   const { data: tasks, error } = await db
     .from("scheduled_tasks")
-    .select("id, user_id")
+    .select("id, user_id, automation_id")
     .eq("status", "pending")
     .lte("run_at", new Date().toISOString())
     .limit(100);
@@ -217,11 +217,39 @@ export async function resumeOverdueScheduledTasks(): Promise<void> {
 
   const { enqueueScheduled } = await import("@/lib/queue/producers");
 
+  let resumed = 0;
+  let cancelled = 0;
+
   for (const task of tasks) {
+    // Never resume a workflow whose automation was deactivated or deleted
+    // while the task slept — cancel the stale continuation instead.
+    let active = false;
+    if (task.automation_id) {
+      const { data: automation } = await db
+        .from("automations")
+        .select("status")
+        .eq("id", task.automation_id)
+        .maybeSingle();
+      active = automation?.status === "active";
+    }
+
+    if (!active) {
+      await db
+        .from("scheduled_tasks")
+        .update({ status: "cancelled" })
+        .eq("id", task.id)
+        .eq("status", "pending");
+      cancelled++;
+      continue;
+    }
+
     await enqueueScheduled({ taskId: task.id, userId: task.user_id }, 0).catch((err) =>
       console.error(`[cron-runner] enqueueScheduled ${task.id}:`, err)
     );
+    resumed++;
   }
 
-  console.info(`[cron-runner] Re-enqueued ${tasks.length} overdue scheduled task(s)`);
+  console.info(
+    `[cron-runner] Overdue scheduled tasks: ${resumed} re-enqueued, ${cancelled} cancelled (inactive automation)`
+  );
 }

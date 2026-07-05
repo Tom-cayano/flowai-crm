@@ -3,6 +3,7 @@
 
 import { claimTask, completeTask } from "@/lib/automation/scheduler";
 import { resumeWorkflow } from "@/lib/automation/engine";
+import { isAutomationActive } from "@/lib/automation/execution-guard";
 import type { ScheduledJob } from "@/lib/queue/types";
 
 export async function processScheduled(job: ScheduledJob): Promise<void> {
@@ -11,6 +12,17 @@ export async function processScheduled(job: ScheduledJob): Promise<void> {
   if (!payload) {
     // Already claimed, cancelled, or done — skip silently
     console.info(`[scheduled-processor] Task ${job.taskId} not claimable — skipping`);
+    return;
+  }
+
+  // The automation may have been deactivated/deleted while the task slept —
+  // resuming would execute stale nodes (e.g. send old messages). Drop it.
+  if (!(await isAutomationActive(payload.context.automationId))) {
+    console.info(
+      `[scheduled-processor] Task ${job.taskId} skipped — automation ` +
+      `${payload.context.automationId} is no longer active`
+    );
+    await completeTask(job.taskId);
     return;
   }
 

@@ -28,7 +28,7 @@ import { Worker, type Job } from "bullmq";
 import { getRedis, closeRedis } from "@/lib/redis/client";
 import { QUEUE_NAMES } from "@/lib/queue/types";
 import { runSessionHealthCheck } from "@/lib/session/monitor";
-import { runCronAutomations, runNoResponseTimeouts } from "@/lib/automation/cron-runner";
+import { runCronAutomations, runNoResponseTimeouts, resumeOverdueScheduledTasks } from "@/lib/automation/cron-runner";
 import { createLogger } from "@/lib/observability/logger";
 import { recordFailure } from "@/lib/observability/dlq";
 import { captureQueueSnapshot, pruneOldSnapshots, recordJobCompleted } from "@/lib/observability/metrics";
@@ -404,6 +404,7 @@ async function start(): Promise<void> {
     const results = await Promise.allSettled([
       runCronAutomations(),
       runNoResponseTimeouts(),
+      resumeOverdueScheduledTasks(),
     ]);
     for (const r of results) {
       if (r.status === "rejected") {

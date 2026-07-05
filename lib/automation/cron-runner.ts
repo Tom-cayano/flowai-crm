@@ -188,3 +188,40 @@ export async function runNoResponseTimeouts(): Promise<void> {
     }
   }
 }
+
+// ─── Overdue scheduled-task sweep ────────────────────────────────────────────
+
+/**
+ * Safety net for wait_delay resumption. scheduleWait() enqueues a delayed
+ * BullMQ job at creation time, but if Redis lost it (flush, eviction, outage)
+ * the scheduled_tasks row would stay pending forever. This sweep re-enqueues
+ * every pending task whose run_at is already in the past. The jobId
+ * (`scheduled-<taskId>`) plus claimTask()'s pending→running transition make
+ * duplicates harmless.
+ */
+export async function resumeOverdueScheduledTasks(): Promise<void> {
+  const db = createAdminClient();
+
+  const { data: tasks, error } = await db
+    .from("scheduled_tasks")
+    .select("id, user_id")
+    .eq("status", "pending")
+    .lte("run_at", new Date().toISOString())
+    .limit(100);
+
+  if (error) {
+    console.error("[cron-runner] Failed to load overdue scheduled tasks:", error.message);
+    return;
+  }
+  if (!tasks?.length) return;
+
+  const { enqueueScheduled } = await import("@/lib/queue/producers");
+
+  for (const task of tasks) {
+    await enqueueScheduled({ taskId: task.id, userId: task.user_id }, 0).catch((err) =>
+      console.error(`[cron-runner] enqueueScheduled ${task.id}:`, err)
+    );
+  }
+
+  console.info(`[cron-runner] Re-enqueued ${tasks.length} overdue scheduled task(s)`);
+}

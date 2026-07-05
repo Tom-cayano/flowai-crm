@@ -45,7 +45,10 @@ function resolveField(
     case "is_business_hours":
       return (bag.ctx.variables[field] as unknown) ?? null;
     default:
-      return null;
+      // Generic fallback: any runtime variable is addressable as a condition
+      // field (contact.email, contact.goal, webhook.source, webhook.data.*).
+      // Unknown fields still resolve to null, matching previous behaviour.
+      return (bag.ctx.variables[field] as unknown) ?? null;
   }
 }
 

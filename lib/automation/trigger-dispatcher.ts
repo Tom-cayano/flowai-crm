@@ -247,9 +247,30 @@ export async function dispatchWebhookLead(opts: {
   const db    = createAdminClient();
   const creds = await resolveInstanceCredentials(opts.userId);
 
+  // Load the contact so workflows can personalize with email + custom fields
+  // ({{contact.email}}, {{contact.goal}}, ...) and condition on them.
+  const { data: contact } = await db
+    .from("contacts")
+    .select("email, custom_fields")
+    .eq("id", opts.contactId)
+    .maybeSingle();
+
+  const contactVars: Record<string, string | number | boolean> = {
+    "contact.email": contact?.email ?? "",
+  };
+  const customFields = (contact?.custom_fields ?? {}) as Record<string, unknown>;
+  for (const [key, value] of Object.entries(customFields)) {
+    if (
+      typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "boolean"
+    ) {
+      contactVars[`contact.${key}`] = value;
+    }
+  }
+
   // Reuse the contact's latest conversation when one exists so actions like
-  // send_message / change_status have a target. Leads without prior contact
-  // start with conversationId null (send actions may open a new conversation).
+  // send_message / update_status / notes have a target.
   const { data: conv } = await db
     .from("conversations")
     .select("id")
@@ -258,6 +279,35 @@ export async function dispatchWebhookLead(opts: {
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
+
+  let conversationId = conv?.id ?? null;
+
+  // No conversation yet and the lead is reachable by phone → open one.
+  // Same shape the inbound message pipeline creates, so when the lead
+  // replies on WhatsApp the message lands in this same conversation
+  // (the pipeline matches by user_id + status + channel + contact_phone).
+  if (!conversationId && opts.phone) {
+    const { data: created, error: convErr } = await db
+      .from("conversations")
+      .insert({
+        user_id:       opts.userId,
+        contact_id:    opts.contactId,
+        contact_name:  opts.contactName || opts.phone,
+        contact_phone: opts.phone,
+        status:        "open",
+        channel:       "whatsapp",
+        tags:          [],
+        unread_count:  0,
+      })
+      .select("id")
+      .single();
+
+    if (convErr) {
+      console.error("[trigger-dispatcher] Could not create conversation for lead:", convErr.message);
+    } else {
+      conversationId = created.id;
+    }
+  }
 
   // Flatten custom_data into engine variables: webhook.data.<key>
   const dataVars: Record<string, string | number | boolean> = {};
@@ -277,7 +327,7 @@ export async function dispatchWebhookLead(opts: {
     executionId:    "",
     automationId:   "",
     userId:         opts.userId,
-    conversationId: conv?.id ?? null,
+    conversationId,
     contactId:      opts.contactId,
     phone:          opts.phone,
     instanceName:   creds.instanceName,
@@ -291,6 +341,7 @@ export async function dispatchWebhookLead(opts: {
       "webhook.event":  opts.event,
       "contact.name":   opts.contactName,
       "contact.phone":  opts.phone,
+      ...contactVars,
       ...dataVars,
     },
   };

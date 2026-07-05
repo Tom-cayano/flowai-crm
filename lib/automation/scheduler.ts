@@ -4,6 +4,7 @@
 // resumeExecution() at run_at time.
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { enqueueScheduled } from "@/lib/queue/producers";
 import type { ExecutionContext } from "@/types/automation";
 
 export interface ScheduleWaitOptions {
@@ -41,6 +42,20 @@ export async function scheduleWait({
     .single();
 
   if (error) throw new Error(`[scheduler] Failed to create task: ${error.message}`);
+
+  // Enqueue the delayed BullMQ job that resumes this task at run_at.
+  // Best-effort: if Redis is momentarily down the overdue-task sweep in the
+  // worker (resumeOverdueScheduledTasks) picks the row up later — the DB row
+  // above is the source of truth, the job is just the alarm clock.
+  try {
+    await enqueueScheduled({ taskId: data.id, userId: ctx.userId }, durationMs);
+  } catch (err) {
+    console.error(
+      `[scheduler] Could not enqueue resume job for task ${data.id} — ` +
+      `the worker sweep will pick it up: ${err instanceof Error ? err.message : err}`
+    );
+  }
+
   return data.id;
 }
 

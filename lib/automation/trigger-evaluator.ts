@@ -2,6 +2,22 @@
 
 import type { TriggerConfig, ExecutionContext } from "@/types/automation";
 
+/**
+ * Normalizes a webhook source/event for comparison: lowercase, accents
+ * stripped, non-alphanumerics collapsed to "-". Makes the filter tolerant
+ * to how the user writes it ("Transforma Fit Coach" ≡ "transforma-fit-coach",
+ * "Lead Created" ≡ "lead_created").
+ */
+export function normalizeWebhookKey(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 export function evaluateTrigger(
   trigger: TriggerConfig,
   ctx: ExecutionContext
@@ -30,9 +46,18 @@ export function evaluateTrigger(
 
     case "webhook_lead": {
       if (ctx.triggerType !== "webhook_lead") return false;
-      // Optional source/event filters — set as variables by the dispatcher
-      if (trigger.webhookSource && trigger.webhookSource !== ctx.variables["webhook.source"]) return false;
-      if (trigger.webhookEvent  && trigger.webhookEvent  !== ctx.variables["webhook.event"])  return false;
+      // Optional source/event filters — set as variables by the dispatcher.
+      // Normalized comparison so "Transforma Fit Coach" matches "transforma-fit-coach".
+      if (
+        trigger.webhookSource &&
+        normalizeWebhookKey(trigger.webhookSource) !==
+          normalizeWebhookKey(String(ctx.variables["webhook.source"] ?? ""))
+      ) return false;
+      if (
+        trigger.webhookEvent &&
+        normalizeWebhookKey(trigger.webhookEvent) !==
+          normalizeWebhookKey(String(ctx.variables["webhook.event"] ?? ""))
+      ) return false;
       return true;
     }
 

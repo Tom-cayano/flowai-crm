@@ -16,6 +16,7 @@ import {
   dispatchWebhookLead,
   dispatchContactCreated,
 } from "@/lib/automation/trigger-dispatcher";
+import { normalizeWebhookKey } from "@/lib/automation/trigger-evaluator";
 import type { Database, Json } from "@/types/supabase";
 import type {
   IntegrationRecord,
@@ -309,8 +310,13 @@ export async function findMatchingAutomations(
     );
     const cfg = triggerNode?.data?.config ?? {};
 
-    const sourceOk = !cfg.webhookSource || cfg.webhookSource === source;
-    const eventOk  = !cfg.webhookEvent  || cfg.webhookEvent  === event;
+    // Same normalized comparison the engine uses (trigger-evaluator)
+    const sourceOk =
+      !cfg.webhookSource ||
+      normalizeWebhookKey(cfg.webhookSource) === normalizeWebhookKey(source);
+    const eventOk =
+      !cfg.webhookEvent ||
+      normalizeWebhookKey(cfg.webhookEvent) === normalizeWebhookKey(event);
 
     if (sourceOk && eventOk) matches.push({ id: automation.id, name: automation.name });
   }

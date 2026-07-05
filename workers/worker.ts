@@ -304,12 +304,16 @@ async function start(): Promise<void> {
     createWorker<AIJob>        (QUEUE_NAMES.WPP_AI,         (j) => processAI(j.data),         CONCURRENCY.ai),
     // ── Universal webhooks retry (always on — leads must never be lost) ──────
     createWorker<LeadWebhookJob>(QUEUE_NAMES.LEAD_WEBHOOK,  (j) => processLeadWebhook(j),     CONCURRENCY.leadWebhook),
-    // ── Optional: session / scheduled / trigger (off by default) ─────────────
+    // ── Optional: session (off by default) ────────────────────────────────────
     ...(process.env.WORKER_ENABLE_SESSION   === "true"
       ? [createWorker<SessionJob>  (QUEUE_NAMES.WPP_SESSION,   (j) => processSession(j.data),   CONCURRENCY.session)]   : []),
-    ...(process.env.WORKER_ENABLE_SCHEDULED === "true"
+    // ── Scheduled + trigger: ON unless explicitly disabled ────────────────────
+    // wait_delay resumption and non-message triggers are core to automation
+    // sequences (24h/48h follow-ups) — an opt-in flag here meant every delay
+    // suspended forever on deployments that never set the flag.
+    ...(process.env.WORKER_ENABLE_SCHEDULED !== "false"
       ? [createWorker<ScheduledJob>(QUEUE_NAMES.WPP_SCHEDULED, (j) => processScheduled(j.data), CONCURRENCY.scheduled)] : []),
-    ...(process.env.WORKER_ENABLE_TRIGGER   === "true"
+    ...(process.env.WORKER_ENABLE_TRIGGER   !== "false"
       ? [createWorker<TriggerJob>  (QUEUE_NAMES.WPP_TRIGGER,   (j) => processTrigger(j.data),   CONCURRENCY.trigger)]   : []),
     // ── Instagram (off by default) ────────────────────────────────────────────
     ...(enableIG ? [

@@ -1933,6 +1933,10 @@ export interface Database {
 
     Views: Record<string, never>;
     Functions: {
+      dashboard_stats: {
+        Args: { p_user_id: string };
+        Returns: Json;
+      };
       increment_unread: {
         Args: { p_id: string };
         Returns: void;

@@ -1,51 +1,65 @@
 "use client";
 
+// System health card — renders GET /api/ops/health.
+//
+// API contract (app/api/ops/health/route.ts):
+//   { ok: boolean, ts: string, checks: Record<string, CheckResult> }
+//   CheckResult = { ok, latencyMs?, detail?, error? }
+//
+// This component previously expected a different shape ({status, redis,
+// workers…}) and crashed the whole /ops page with a client-side TypeError.
+// It now renders the real contract defensively: unknown/missing fields
+// never throw.
+
 import { useEffect, useState, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 
-interface HealthData {
-  status:   "healthy" | "degraded" | "unhealthy";
-  redis:    { ok: boolean; latencyMs: number };
-  supabase: { ok: boolean; latencyMs: number };
-  workers: {
-    alive:   number;
-    stale:   number;
-    details: Array<{ workerId: string; lastBeat: string; queues: string[] }>;
-  };
+interface CheckResult {
+  ok:         boolean;
+  latencyMs?: number;
+  detail?:    string;
+  error?:     string;
 }
 
-const STATUS_STYLES: Record<HealthData["status"], string> = {
-  healthy:   "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
-  degraded:  "bg-amber-500/15  text-amber-400  border-amber-500/30",
-  unhealthy: "bg-red-500/15    text-red-400    border-red-500/30",
+interface HealthData {
+  ok:     boolean;
+  ts:     string;
+  checks: Record<string, CheckResult>;
+}
+
+const CHECK_LABELS: Record<string, string> = {
+  envVars:   "Variables de entorno",
+  supabase:  "Supabase",
+  redis:     "Redis",
+  evolution: "Evolution API",
+  whatsapp:  "Sesión WhatsApp",
 };
 
 function Dot({ ok }: { ok: boolean }) {
   return (
     <span
-      className={`inline-block h-2 w-2 rounded-full ${ok ? "bg-emerald-400" : "bg-red-400"}`}
+      className={`inline-block h-2 w-2 rounded-full shrink-0 ${ok ? "bg-emerald-400" : "bg-red-400"}`}
     />
   );
 }
 
-function secondsAgo(iso: string): string {
-  const s = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
-  if (s < 60)  return `${s}s ago`;
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-  return `${Math.floor(s / 3600)}h ago`;
-}
-
 export function SystemHealth() {
   const [data, setData]       = useState<HealthData | null>(null);
+  const [failed, setFailed]   = useState(false);
   const [loading, setLoading] = useState(true);
 
   const fetch_ = useCallback(async () => {
     try {
       const res = await fetch("/api/ops/health");
       if (res.ok || res.status === 503) {
-        setData(await res.json());
+        const json = (await res.json()) as HealthData;
+        setData(json && typeof json === "object" ? json : null);
+        setFailed(false);
+      } else {
+        setFailed(true);
       }
+    } catch {
+      setFailed(true);
     } finally {
       setLoading(false);
     }
@@ -61,71 +75,65 @@ export function SystemHealth() {
     return (
       <Card>
         <CardHeader><CardTitle className="text-sm">System Health</CardTitle></CardHeader>
-        <CardContent className="text-xs text-muted-foreground">Loading…</CardContent>
+        <CardContent className="text-xs text-muted-foreground">Cargando…</CardContent>
       </Card>
     );
   }
 
-  if (!data) return null;
+  if (!data || !data.checks) {
+    return (
+      <Card>
+        <CardHeader><CardTitle className="text-sm">System Health</CardTitle></CardHeader>
+        <CardContent className="text-xs text-muted-foreground">
+          {failed ? "No se pudo consultar /api/ops/health" : "Sin datos de salud disponibles"}
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const entries  = Object.entries(data.checks);
+  const okCount  = entries.filter(([, c]) => c?.ok).length;
+  const healthy  = data.ok;
+  const badge    = healthy
+    ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+    : okCount > 0
+      ? "bg-amber-500/15 text-amber-400 border-amber-500/30"
+      : "bg-red-500/15 text-red-400 border-red-500/30";
 
   return (
     <Card>
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm">System Health</CardTitle>
-          <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[data.status]}`}>
-            {data.status}
+          <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${badge}`}>
+            {healthy ? "healthy" : `${okCount}/${entries.length} ok`}
           </span>
         </div>
       </CardHeader>
-      <CardContent className="space-y-4 text-xs">
-        {/* Services */}
-        <div className="space-y-1.5">
-          <p className="font-medium text-muted-foreground uppercase tracking-wide text-[10px]">Services</p>
-          <div className="flex items-center gap-2">
-            <Dot ok={data.redis.ok} />
-            <span className="text-foreground">Redis</span>
-            <span className="ml-auto text-muted-foreground">{data.redis.latencyMs}ms</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Dot ok={data.supabase.ok} />
-            <span className="text-foreground">Supabase</span>
-            <span className="ml-auto text-muted-foreground">{data.supabase.latencyMs}ms</span>
-          </div>
-        </div>
-
-        {/* Workers */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
-            <p className="font-medium text-muted-foreground uppercase tracking-wide text-[10px]">Workers</p>
-            <div className="flex gap-2">
-              <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-                {data.workers.alive} alive
-              </Badge>
-              {data.workers.stale > 0 && (
-                <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
-                  {data.workers.stale} stale
-                </Badge>
+      <CardContent className="space-y-1.5 text-xs">
+        {entries.map(([key, check]) => (
+          <div key={key} className="flex items-start gap-2">
+            <span className="mt-1"><Dot ok={!!check?.ok} /></span>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="text-foreground">{CHECK_LABELS[key] ?? key}</span>
+                {typeof check?.latencyMs === "number" && (
+                  <span className="ml-auto text-muted-foreground shrink-0">{check.latencyMs}ms</span>
+                )}
+              </div>
+              {(check?.detail || check?.error) && (
+                <p className={`truncate text-[10px] ${check?.error ? "text-red-400" : "text-muted-foreground"}`}>
+                  {check?.error ?? check?.detail}
+                </p>
               )}
             </div>
           </div>
-          {data.workers.details.map((w) => {
-            const age = Date.now() - new Date(w.lastBeat).getTime();
-            const isStale = age > 90_000;
-            return (
-              <div key={w.workerId} className="flex items-start gap-2">
-                <Dot ok={!isStale} />
-                <div className="min-w-0">
-                  <p className="truncate font-mono text-[10px] text-foreground">{w.workerId}</p>
-                  <p className="text-muted-foreground">{secondsAgo(w.lastBeat)}</p>
-                </div>
-              </div>
-            );
-          })}
-          {data.workers.details.length === 0 && (
-            <p className="text-muted-foreground italic">No workers registered</p>
-          )}
-        </div>
+        ))}
+        {data.ts && (
+          <p className="pt-1 text-[10px] text-muted-foreground">
+            Última comprobación: {new Date(data.ts).toLocaleTimeString()}
+          </p>
+        )}
       </CardContent>
     </Card>
   );

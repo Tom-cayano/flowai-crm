@@ -5,16 +5,41 @@ import {
   TrendingUp,
   Clock,
   Zap,
+  Target,
   ArrowRight,
 } from "lucide-react";
+import { redirect } from "next/navigation";
+import { createClient } from "@/lib/supabase/server";
+import {
+  getDashboardStats,
+  growthPct,
+  formatResponseTime,
+} from "@/lib/dashboard/stats";
 import { StatsCard } from "@/components/dashboard/stats-card";
 import { ActivityFeed } from "@/components/dashboard/activity-feed";
 import { QuickStatsChart } from "@/components/dashboard/quick-stats-chart";
 import { TopContactsTable } from "@/components/dashboard/top-contacts-table";
-import { mockDashboardStats } from "@/data/mock-data";
 
-export default function DashboardPage() {
-  const s = mockDashboardStats;
+export const dynamic = "force-dynamic";
+
+export default async function DashboardPage() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const s = await getDashboardStats(user.id);
+
+  // Métricas derivadas (todo real, desde Supabase)
+  const totalContacts    = s?.total_contacts ?? 0;
+  const openConvs        = s?.conversations_open ?? 0;
+  const pendingConvs     = s?.conversations_pending ?? 0;
+  const messagesSent     = s?.messages_sent_30d ?? 0;
+  const started          = s?.started_conversations ?? 0;
+  const answered         = s?.answered_conversations ?? 0;
+  const responseRate     = started > 0 ? Math.round((answered / started) * 1000) / 10 : 0;
+  const avgResponseTime  = formatResponseTime(s?.avg_response_seconds ?? null);
+  const automationsCount = s?.automations_active ?? 0;
+  const leads30d         = s?.leads_30d ?? 0;
 
   return (
     <div className="p-5 sm:p-6 space-y-5 max-w-screen-2xl mx-auto">
@@ -27,10 +52,9 @@ export default function DashboardPage() {
             <h2 className="text-[15px] font-semibold text-foreground">Buenos días 👋</h2>
             <p className="text-[13px] text-muted-foreground mt-1">
               Tienes{" "}
-              <span className="text-[#10b981] font-semibold">{s.openTickets} tickets abiertos</span>
+              <span className="text-[#10b981] font-semibold">{pendingConvs} conversaciones pendientes</span>
               {" "}y{" "}
-              <span className="text-[#10b981] font-semibold">{s.activeConversations} conversaciones activas</span>
-              {" "}hoy.
+              <span className="text-[#10b981] font-semibold">{openConvs} conversaciones abiertas</span>.
             </p>
           </div>
           <div className="hidden md:flex items-center gap-6 shrink-0">
@@ -38,7 +62,7 @@ export default function DashboardPage() {
               <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-[0.08em]">
                 Resp. media
               </p>
-              <p className="text-xl font-bold text-[#10b981] tabular-nums">{s.avgResponseTime}</p>
+              <p className="text-xl font-bold text-[#10b981] tabular-nums">{avgResponseTime}</p>
             </div>
             <a
               href="/conversations"
@@ -55,32 +79,32 @@ export default function DashboardPage() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <StatsCard
           title="Contactos totales"
-          value={s.totalContacts.toLocaleString("es-ES")}
-          change={s.contactsGrowth}
+          value={totalContacts.toLocaleString("es-ES")}
+          change={growthPct(s?.contacts_30d ?? 0, s?.contacts_prev_30d ?? 0)}
           icon={Users}
           iconColor="text-blue-400"
           iconBg="bg-blue-500/10"
         />
         <StatsCard
           title="Conversaciones activas"
-          value={s.activeConversations}
-          change={s.conversationsGrowth}
+          value={openConvs}
+          change={growthPct(s?.conversations_30d ?? 0, s?.conversations_prev_30d ?? 0)}
           icon={MessageSquare}
           iconColor="text-[#10b981]"
           iconBg="bg-[#10b981]/10"
         />
         <StatsCard
-          title="Mensajes enviados"
-          value={s.messagesSent.toLocaleString("es-ES")}
-          change={s.messagesSentGrowth}
+          title="Mensajes enviados (30 d)"
+          value={messagesSent.toLocaleString("es-ES")}
+          change={growthPct(messagesSent, s?.messages_sent_prev_30d ?? 0)}
           icon={Send}
           iconColor="text-violet-400"
           iconBg="bg-violet-500/10"
         />
         <StatsCard
           title="Tasa de respuesta"
-          value={s.responseRate}
-          change={s.responseRateGrowth}
+          value={responseRate}
+          change={0}
           icon={TrendingUp}
           iconColor="text-amber-400"
           iconBg="bg-amber-500/10"
@@ -89,11 +113,12 @@ export default function DashboardPage() {
       </div>
 
       {/* Quick metrics row */}
-      <div className="grid grid-cols-3 gap-3 sm:gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
         {[
-          { label: "Tickets abiertos", value: s.openTickets, icon: TrendingUp, color: "text-red-400", bg: "bg-red-500/10" },
-          { label: "Tiempo de respuesta", value: s.avgResponseTime, icon: Clock, color: "text-[#10b981]", bg: "bg-[#10b981]/10" },
-          { label: "Automatizaciones activas", value: "4", icon: Zap, color: "text-violet-400", bg: "bg-violet-500/10" },
+          { label: "Conversaciones pendientes", value: pendingConvs,     icon: TrendingUp, color: "text-red-400",     bg: "bg-red-500/10" },
+          { label: "Tiempo de respuesta",       value: avgResponseTime,  icon: Clock,      color: "text-[#10b981]",  bg: "bg-[#10b981]/10" },
+          { label: "Automatizaciones activas",  value: automationsCount, icon: Zap,        color: "text-violet-400", bg: "bg-violet-500/10" },
+          { label: "Leads nuevos (30 d)",       value: leads30d,         icon: Target,     color: "text-sky-400",    bg: "bg-sky-500/10" },
         ].map((m) => (
           <div key={m.label} className="rounded-xl border border-border bg-card p-4 flex items-center gap-3">
             <div className={`h-9 w-9 rounded-lg flex items-center justify-center shrink-0 ${m.bg}`}>
@@ -110,13 +135,13 @@ export default function DashboardPage() {
       {/* Chart + Activity */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2">
-          <QuickStatsChart />
+          <QuickStatsChart data={s?.messages_per_day ?? []} />
         </div>
-        <ActivityFeed />
+        <ActivityFeed items={s?.recent_activity ?? []} />
       </div>
 
       {/* Top contacts table */}
-      <TopContactsTable />
+      <TopContactsTable contacts={s?.top_contacts ?? []} />
     </div>
   );
 }

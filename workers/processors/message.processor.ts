@@ -500,18 +500,65 @@ async function insertWhatsAppMessage(
 
 // ─── CRM layer ────────────────────────────────────────────────────────────────
 
+/**
+ * Finds the canonical CRM contact for a phone number.
+ *
+ * Two-step match:
+ *   1. Exact phone/whatsapp equality (fast path — Evolution numbers are
+ *      digits-only and lead-created contacts store digits).
+ *   2. Fallback for formatted numbers ("+34 627 394 431"): fetch candidates
+ *      by last-digits pattern and compare digits-normalized in JS.
+ *
+ * Always ordered oldest-first and limited to one row: with duplicated
+ * contacts, .maybeSingle() errors out (multiple rows) and the caller used to
+ * create yet another duplicate on every inbound message.
+ */
+async function findCrmContactByPhone(
+  db: DB,
+  userId: string,
+  phone: string
+): Promise<{ id: string; name: string } | null> {
+  const digits = phone.replace(/\D/g, "");
+
+  const { data: exact } = await db
+    .from("contacts")
+    .select("id, name")
+    .eq("user_id", userId)
+    .or(`phone.eq.${digits},whatsapp.eq.${digits}`)
+    .order("created_at", { ascending: true })
+    .limit(1);
+
+  if (exact?.[0]) return exact[0];
+
+  if (digits.length < 7) return null;
+
+  // Formatted-number fallback: candidates whose phone/whatsapp ends with the
+  // same last 4 digits, then strict digits comparison in JS.
+  const tail = digits.slice(-4);
+  const { data: candidates } = await db
+    .from("contacts")
+    .select("id, name, phone, whatsapp, created_at")
+    .eq("user_id", userId)
+    .or(`phone.ilike.%${tail},whatsapp.ilike.%${tail}`)
+    .order("created_at", { ascending: true })
+    .limit(25);
+
+  for (const c of candidates ?? []) {
+    const cPhone    = (c.phone ?? "").replace(/\D/g, "");
+    const cWhatsapp = (c.whatsapp ?? "").replace(/\D/g, "");
+    if (cPhone === digits || cWhatsapp === digits) return { id: c.id, name: c.name };
+  }
+
+  return null;
+}
+
 async function upsertCrmContact(
   db: DB,
   userId: string,
   phone: string,
   displayName: string
 ): Promise<string | null> {
-  const { data: existing } = await db
-    .from("contacts")
-    .select("id, name")
-    .eq("user_id", userId)
-    .or(`phone.eq.${phone},whatsapp.eq.${phone}`)
-    .maybeSingle();
+  const existing = await findCrmContactByPhone(db, userId, phone);
 
   if (existing) {
     const needsPatch =
@@ -543,12 +590,7 @@ async function upsertCrmContact(
   if (insertError) {
     // Unique violation: concurrent job already inserted — re-query the winner
     if (insertError.code === "23505" || insertError.message.includes("duplicate")) {
-      const { data: winner } = await db
-        .from("contacts")
-        .select("id")
-        .eq("user_id", userId)
-        .or(`phone.eq.${phone},whatsapp.eq.${phone}`)
-        .maybeSingle();
+      const winner = await findCrmContactByPhone(db, userId, phone);
       return winner?.id ?? null;
     }
     console.error("[msg-processor] contacts insert error:", insertError.message);

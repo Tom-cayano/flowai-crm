@@ -189,8 +189,9 @@ export async function executeAction(
       // ── AI reply ──────────────────────────────────────────────────────────
       case "ai_reply": {
         if (!ctx.conversationId) return { ok: true };
+        let aiResult: Awaited<ReturnType<typeof runAIReply>>;
         try {
-          await runAIReply({
+          aiResult = await runAIReply({
             userId:         ctx.userId,
             conversationId: ctx.conversationId,
             phone:          ctx.phone,
@@ -212,7 +213,15 @@ export async function executeAction(
           await log("error", `ai_reply error: ${msg}`);
           return { ok: false, error: msg };
         }
-        await log("info", "Respuesta IA enviada");
+        // runAIReply returns sent:false on generation errors, low-confidence
+        // handoff, empty completions and moderation blocks — surface which.
+        if (aiResult.sent) {
+          await log("info", "Respuesta IA enviada");
+        } else if (aiResult.handedOff) {
+          await log("info", `Respuesta IA no enviada — traspaso humano (${aiResult.handoffReason ?? "sin motivo"})`);
+        } else {
+          await log("warn", "Respuesta IA no enviada — generación falló, respuesta vacía o bloqueada por moderación (revisar OPENAI_API_KEY del worker y logs [ai])");
+        }
         return { ok: true };
       }
 

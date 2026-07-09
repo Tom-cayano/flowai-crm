@@ -54,11 +54,13 @@ function madridParts(at: Date): { year: number; month: number; day: number; week
 
 /** "jueves 10 de julio a las 17:00" — para mensajes y confirmaciones. */
 export function formatSlot(at: Date): string {
-  const s = new Intl.DateTimeFormat("es-ES", {
+  const datePart = new Intl.DateTimeFormat("es-ES", {
     timeZone: TZ, weekday: "long", day: "numeric", month: "long",
-    hour: "2-digit", minute: "2-digit",
+  }).format(at).replace(",", "");
+  const hourPart = new Intl.DateTimeFormat("es-ES", {
+    timeZone: TZ, hour: "2-digit", minute: "2-digit",
   }).format(at);
-  return s.replace(",", " a las");
+  return `${datePart} a las ${hourPart}`;
 }
 
 // ─── Huecos libres ────────────────────────────────────────────────────────────

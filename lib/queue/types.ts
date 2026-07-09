@@ -35,6 +35,8 @@ export const QUEUE_NAMES = {
   WAC_OUTBOUND:   "wac-outbound",   // Outbound Cloud API message sending
   // ─── Universal webhooks (external apps → /api/webhooks/leads) ──────────
   LEAD_WEBHOOK:   "lead-webhook",   // Retry queue for failed lead events
+  // ─── Email nativo (Resend) ─────────────────────────────────────────────
+  EMAIL_OUTBOUND: "email-outbound", // Envío de emails con reintentos
 } as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];
@@ -365,6 +367,19 @@ export interface WACOutboundJob {
 export interface LeadWebhookJob {
   eventId: string;
   userId:  string;
+}
+
+/**
+ * Envío de un email ya renderizado. El log (email_logs) existe antes de
+ * encolar; el processor entrega vía Resend y actualiza su estado.
+ */
+export interface EmailJob {
+  logId:        string;
+  userId:       string;
+  to:           string;
+  subject:      string;
+  html:         string;
+  attachments?: Array<{ filename: string; content: string }>;
 }
 
 // ─── Job result shapes ────────────────────────────────────────────────────────

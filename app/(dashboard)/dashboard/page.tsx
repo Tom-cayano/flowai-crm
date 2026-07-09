@@ -132,6 +132,25 @@ export default async function DashboardPage() {
         ))}
       </div>
 
+      {/* Métricas de email (30 d) — reales, de email_logs */}
+      {(s?.email?.sent ?? 0) > 0 && (
+        <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
+          {[
+            { label: "Emails enviados",  value: s!.email!.sent },
+            { label: "Entregados",       value: s!.email!.delivered },
+            { label: "Abiertos",         value: s!.email!.opened },
+            { label: "Clicks",           value: s!.email!.clicked },
+            { label: "CTR",              value: s!.email!.opened > 0 ? `${Math.round((s!.email!.clicked / s!.email!.opened) * 100)}%` : "0%" },
+            { label: "Rebotes",          value: s!.email!.bounced },
+          ].map((m) => (
+            <div key={m.label} className="rounded-xl border border-border bg-card p-3">
+              <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-[0.07em] truncate">{m.label}</p>
+              <p className="text-[15px] font-bold text-foreground tabular-nums">{m.value}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Chart + Activity */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2">

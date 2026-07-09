@@ -22,6 +22,7 @@ import {
   getWACMessageQueue,
   getWACOutboundQueue,
   getLeadWebhookQueue,
+  getEmailQueue,
   BASE_JOB_OPTIONS,
   RETRY_OPTIONS,
 } from "./queues";
@@ -46,6 +47,7 @@ import type {
   WACMessageJob,
   WACOutboundJob,
   LeadWebhookJob,
+  EmailJob,
 } from "./types";
 
 export async function enqueueMessage(job: MessageJob): Promise<string> {
@@ -266,6 +268,18 @@ export async function enqueueLeadWebhookRetry(job: LeadWebhookJob): Promise<stri
     attempts: 5,
     backoff: { type: "exponential", delay: 30_000 },
     jobId: `lead-evt-${job.eventId}`,
+  });
+  return result.id ?? "";
+}
+
+/** Envío de email — 4 intentos con backoff exponencial (30 s → 4 min). */
+export async function enqueueEmailSend(job: EmailJob): Promise<string> {
+  const q = getEmailQueue();
+  const result = await q.add("send", job, {
+    ...BASE_JOB_OPTIONS,
+    attempts: 4,
+    backoff: { type: "exponential", delay: 30_000 },
+    jobId: `email-${job.logId}`,
   });
   return result.id ?? "";
 }

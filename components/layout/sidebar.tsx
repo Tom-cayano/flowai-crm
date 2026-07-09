@@ -61,6 +61,7 @@ const navItems = [
 
 const bottomItems = [
   { href: "/settings/integrations/meta", label: "Conexión Meta",    icon: Zap },
+  { href: "/settings/email",             label: "Email",            icon: Zap },
   { href: "/settings/channels",          label: "Canales",          icon: Smartphone },
   { href: "/settings/team",              label: "Equipo",           icon: UserCog },
   { href: "/settings/billing",           label: "Facturación",      icon: CreditCard },

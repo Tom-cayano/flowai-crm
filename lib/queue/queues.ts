@@ -26,6 +26,7 @@ import type {
   WACMessageJob,
   WACOutboundJob,
   LeadWebhookJob,
+  EmailJob,
 } from "./types";
 
 // ─── Default job options ──────────────────────────────────────────────────────
@@ -71,6 +72,9 @@ let wacOutboundQueue: Queue<WACOutboundJob> | null = null;
 // ─── Universal webhook singleton ──────────────────────────────────────────────
 let leadWebhookQueue: Queue<LeadWebhookJob> | null = null;
 
+// ─── Email singleton ──────────────────────────────────────────────────────────
+let emailQueue: Queue<EmailJob> | null = null;
+
 function conn() {
   return { connection: getProducerRedis() };
 }
@@ -99,5 +103,7 @@ export function getWACMessageQueue():  Queue<WACMessageJob>  { return (wacMessag
 export function getWACOutboundQueue(): Queue<WACOutboundJob> { return (wacOutboundQueue ??= new Queue(QUEUE_NAMES.WAC_OUTBOUND, conn())); }
 
 export function getLeadWebhookQueue(): Queue<LeadWebhookJob> { return (leadWebhookQueue ??= new Queue(QUEUE_NAMES.LEAD_WEBHOOK, conn())); }
+
+export function getEmailQueue():       Queue<EmailJob>       { return (emailQueue       ??= new Queue(QUEUE_NAMES.EMAIL_OUTBOUND, conn())); }
 
 export { BASE_JOB_OPTIONS, RETRY_OPTIONS };

@@ -995,6 +995,67 @@ export interface Database {
         };
         Relationships: [];
       };
+      email_settings: {
+        Row: {
+          id: string; user_id: string; resend_api_key: string | null;
+          from_email: string | null; from_name: string | null; reply_to: string | null;
+          webhook_secret: string | null; enabled: boolean;
+          created_at: string; updated_at: string;
+        };
+        Insert: {
+          id?: string; user_id: string; resend_api_key?: string | null;
+          from_email?: string | null; from_name?: string | null; reply_to?: string | null;
+          webhook_secret?: string | null; enabled?: boolean;
+          created_at?: string; updated_at?: string;
+        };
+        Update: {
+          resend_api_key?: string | null; from_email?: string | null;
+          from_name?: string | null; reply_to?: string | null;
+          webhook_secret?: string | null; enabled?: boolean; updated_at?: string;
+        };
+        Relationships: [];
+      };
+      email_templates: {
+        Row: {
+          id: string; user_id: string; slug: string; name: string;
+          subject: string; body_html: string; created_at: string; updated_at: string;
+        };
+        Insert: {
+          id?: string; user_id: string; slug: string; name: string;
+          subject: string; body_html: string; created_at?: string; updated_at?: string;
+        };
+        Update: {
+          slug?: string; name?: string; subject?: string; body_html?: string; updated_at?: string;
+        };
+        Relationships: [];
+      };
+      email_logs: {
+        Row: {
+          id: string; user_id: string; contact_id: string | null; conversation_id: string | null;
+          template_slug: string | null; to_email: string; subject: string;
+          resend_email_id: string | null;
+          status: "queued" | "sent" | "delivered" | "delayed" | "bounced" | "complained" | "failed";
+          opened_at: string | null; clicked_at: string | null; delivered_at: string | null;
+          bounced_at: string | null; error: string | null; attempts: number;
+          origin: string; created_at: string; updated_at: string;
+        };
+        Insert: {
+          id?: string; user_id: string; contact_id?: string | null; conversation_id?: string | null;
+          template_slug?: string | null; to_email: string; subject: string;
+          resend_email_id?: string | null;
+          status?: "queued" | "sent" | "delivered" | "delayed" | "bounced" | "complained" | "failed";
+          opened_at?: string | null; clicked_at?: string | null; delivered_at?: string | null;
+          bounced_at?: string | null; error?: string | null; attempts?: number;
+          origin?: string; created_at?: string; updated_at?: string;
+        };
+        Update: {
+          resend_email_id?: string | null;
+          status?: "queued" | "sent" | "delivered" | "delayed" | "bounced" | "complained" | "failed";
+          opened_at?: string | null; clicked_at?: string | null; delivered_at?: string | null;
+          bounced_at?: string | null; error?: string | null; attempts?: number; updated_at?: string;
+        };
+        Relationships: [];
+      };
       appointments: {
         Row: {
           id: string;

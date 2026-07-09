@@ -131,6 +131,7 @@ export type ActionType =
   | "human_handoff"
   | "end_workflow"
   | "sales_assistant"          // asistente comercial (funnel de reservas)
+  | "send_email"               // canal email nativo (Resend)
   // ─── Instagram actions ───────────────────────────────────────────────────
   | "send_instagram_dm"        // send/reply via Instagram DM
   | "reply_instagram_comment"  // reply to a specific comment publicly
@@ -273,6 +274,19 @@ export interface SendMessengerMessageAction {
   delayMs?: number;
 }
 
+export interface SendEmailAction {
+  type: "send_email";
+  /** Plantilla de email_templates a usar (por slug). */
+  templateSlug?: string;
+  /** Asunto y cuerpo directos (si no se usa plantilla). Admiten {{variables}}. */
+  subject?:  string;
+  bodyHtml?: string;
+  /** Generar asunto+contenido con IA según objetivo/tags/historial. */
+  aiGenerate?: boolean;
+  /** Propósito para la IA ("recuperar lead", "oferta de renovación"...). */
+  aiPurpose?:  string;
+}
+
 export interface SalesAssistantAction {
   type: "sales_assistant";
   /**
@@ -302,6 +316,7 @@ export type ActionConfig =
   | HumanHandoffAction
   | EndWorkflowAction
   | SalesAssistantAction
+  | SendEmailAction
   | SendInstagramDMAction
   | ReplyInstagramCommentAction
   | AssignInstagramLeadAction

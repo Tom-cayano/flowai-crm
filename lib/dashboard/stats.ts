@@ -44,6 +44,10 @@ export interface DashboardStatsPayload {
   messages_per_day:        DayPoint[];
   recent_activity:         ActivityItem[];
   top_contacts:            TopContact[];
+  email?: {
+    sent: number; delivered: number; opened: number;
+    clicked: number; bounced: number; failed: number;
+  };
 }
 
 /** Growth % between the current and previous 30-day window. */

@@ -169,6 +169,44 @@ export const COPY = {
     "Para avanzar rápido, respóndeme con el número de la opción que prefieras 😊",
 } as const;
 
+// ─── V2: menú de WhatsApp directo, planes y recuperación ─────────────────────
+
+export const DIRECT_MENU =
+  "¡Hola! 👋 Soy el asistente de Love Fitness Murcia.\n\n" +
+  "¿Sobre qué te gustaría recibir información?\n\n" +
+  "1️⃣ Entrenamiento grupal\n2️⃣ Entrenamiento funcional\n3️⃣ Personal Trainer\n" +
+  "4️⃣ Entrenamiento online\n5️⃣ Horarios\n6️⃣ Reservar clase de prueba";
+
+export const PLAN_DETAILS: Record<number, string> = {
+  1: "💪 *Entrenamiento grupal — 59€/mes*\nEntrenamientos de lunes a viernes.\nIncluye Open Box 24 horas los 365 días.",
+  2: "🏃 *Entrenamiento funcional — 39,99€/mes*\n3 días por semana.\nEntrenamientos guiados desde la App.\nNo incluye Open Box.",
+  3: "🎯 *Personal Trainer — 180€/mes*\n3 entrenamientos personales por semana.\nIncluye dieta personalizada y 3 sesiones Tesla Slimming.",
+  4: "⭐ *Personal Trainer Premium — 250€/mes*\n5 entrenamientos personales por semana.\nIncluye dieta personalizada, 4 sesiones Tesla Slimming y horario flexible.",
+};
+
+export const AFTER_PLAN_CTA =
+  "¿Quieres venir a conocerlo?\n1️⃣ Reservar clase de prueba (10€, gratis si te apuntas ese día)\n2️⃣ Ver otro plan";
+
+/** Detecta "ahora no puedo / más adelante / no tengo tiempo" — no insistir. */
+export function detectSnooze(text: string): boolean {
+  const t = normalize(text);
+  return [
+    "ahora no puedo", "no puedo ahora", "mas adelante", "más adelante",
+    "no tengo tiempo", "otro momento", "otro dia", "ahora no",
+    "luego te digo", "ya te dire", "ya te diré",
+  ].some((k) => t.includes(normalize(k)));
+}
+
+export const SNOOZE_ASK =
+  "No pasa nada 😊\n¿Prefieres que volvamos a hablar?\n1️⃣ Mañana\n2️⃣ La semana que viene";
+
+export const SNOOZE_CONFIRM = (cuando: string) =>
+  `¡Perfecto! Te escribo ${cuando}. ¡Que vaya genial! 💪`;
+
+export const SNOOZE_NUDGE = (nombre: string) =>
+  `¡Hola${nombre ? ` ${nombre}` : ""}! 😊 Como me pediste, retomamos.\n` +
+  "¿Reservamos tu hueco?\n1️⃣ Ver horarios disponibles\n2️⃣ Ahora no";
+
 export const KIND_LABEL: Record<string, string> = {
   valoracion_video:   "tu valoración gratuita por videollamada",
   valoracion_llamada: "tu valoración gratuita por teléfono",

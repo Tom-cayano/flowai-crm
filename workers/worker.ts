@@ -30,7 +30,7 @@ import { QUEUE_NAMES } from "@/lib/queue/types";
 import { runSessionHealthCheck } from "@/lib/session/monitor";
 import { runCronAutomations, runNoResponseTimeouts, resumeOverdueScheduledTasks } from "@/lib/automation/cron-runner";
 import { scheduleIGTokenRefreshes } from "@/lib/meta/token-refresh";
-import { sendAppointmentReminders } from "@/lib/sales/reminders";
+import { sendAppointmentReminders, handleNoShows, sendSnoozeNudges } from "@/lib/sales/reminders";
 import { createLogger } from "@/lib/observability/logger";
 import { recordFailure } from "@/lib/observability/dlq";
 import { captureQueueSnapshot, pruneOldSnapshots, recordJobCompleted } from "@/lib/observability/metrics";
@@ -56,6 +56,7 @@ import { processMessengerOutbound } from "./processors/messenger-outbound.proces
 import { processWACMessage }        from "./processors/whatsapp-cloud-message.processor";
 import { processWACOutbound }       from "./processors/whatsapp-cloud-outbound.processor";
 import { processLeadWebhook }       from "./processors/lead-webhook.processor";
+import { processEmail }             from "./processors/email.processor";
 
 import type {
   MessageJob, StatusJob, MediaJob, AutomationJob,
@@ -63,7 +64,7 @@ import type {
   IGMessageJob, IGOutboundJob, IGCommentJob, IGMediaJob, IGTokenJob,
   FBMessageJob, FBOutboundJob,
   WACMessageJob, WACOutboundJob,
-  LeadWebhookJob,
+  LeadWebhookJob, EmailJob,
 } from "@/lib/queue/types";
 
 // ─── Identity ─────────────────────────────────────────────────────────────────
@@ -99,6 +100,8 @@ const CONCURRENCY = {
   wacOutbound: Number(process.env.WORKER_CONCURRENCY_WAC_OUTBOUND ?? 2),
   // Universal webhooks — retry queue for failed lead events
   leadWebhook: Number(process.env.WORKER_CONCURRENCY_LEAD_WEBHOOK ?? 3),
+  // Email nativo (Resend)
+  email:       Number(process.env.WORKER_CONCURRENCY_EMAIL        ?? 3),
 };
 
 // ─── Worker factory ───────────────────────────────────────────────────────────
@@ -306,6 +309,8 @@ async function start(): Promise<void> {
     createWorker<AIJob>        (QUEUE_NAMES.WPP_AI,         (j) => processAI(j.data),         CONCURRENCY.ai),
     // ── Universal webhooks retry (always on — leads must never be lost) ──────
     createWorker<LeadWebhookJob>(QUEUE_NAMES.LEAD_WEBHOOK,  (j) => processLeadWebhook(j),     CONCURRENCY.leadWebhook),
+    // ── Email nativo (always on) ──────────────────────────────────────────────
+    createWorker<EmailJob>      (QUEUE_NAMES.EMAIL_OUTBOUND,(j) => processEmail(j),           CONCURRENCY.email),
     // ── Optional: session (off by default) ────────────────────────────────────
     ...(process.env.WORKER_ENABLE_SESSION   === "true"
       ? [createWorker<SessionJob>  (QUEUE_NAMES.WPP_SESSION,   (j) => processSession(j.data),   CONCURRENCY.session)]   : []),
@@ -413,6 +418,9 @@ async function start(): Promise<void> {
       resumeOverdueScheduledTasks(),
       // Recordatorios de citas del asistente comercial (24 h / 1 h antes)
       sendAppointmentReminders(),
+      // No-shows → estado + tarea; leads pospuestos → re-engagement
+      handleNoShows(),
+      sendSnoozeNudges(),
       // Proactive Meta token refresh (long-lived IG tokens expire in 60 days).
       // Only when the IG workers are on — otherwise the jobs would have no consumer.
       ...(enableIG ? [scheduleIGTokenRefreshes()] : []),

@@ -104,7 +104,15 @@ select jsonb_build_object(
   'automations_active',   (select count(*) from automations where user_id = p_user_id and status = 'active'),
   'messages_per_day',     (select coalesce(jsonb_agg(jsonb_build_object('day', day, 'sent', sent, 'total', total, 'conversations', convs) order by day), '[]'::jsonb) from per_day),
   'recent_activity',      (select coalesce(jsonb_agg(jsonb_build_object('type', type, 'text', text, 'ts', ts) order by ts desc), '[]'::jsonb) from (select * from activity order by ts desc limit 8) x),
-  'top_contacts',         (select coalesce(jsonb_agg(jsonb_build_object('id', id, 'name', name, 'company', company, 'status', status, 'messages', messages, 'last_message_at', last_message_at) order by messages desc), '[]'::jsonb) from top_contacts)
+  'top_contacts',         (select coalesce(jsonb_agg(jsonb_build_object('id', id, 'name', name, 'company', company, 'status', status, 'messages', messages, 'last_message_at', last_message_at) order by messages desc), '[]'::jsonb) from top_contacts),
+  'email',                (select jsonb_build_object(
+                             'sent',      count(*) filter (where status in ('sent','delivered')),
+                             'delivered', count(*) filter (where status = 'delivered'),
+                             'opened',    count(*) filter (where opened_at is not null),
+                             'clicked',   count(*) filter (where clicked_at is not null),
+                             'bounced',   count(*) filter (where status = 'bounced'),
+                             'failed',    count(*) filter (where status = 'failed')
+                           ) from email_logs where user_id = p_user_id and created_at >= now() - interval '30 days')
 );
 $$;
 

@@ -55,6 +55,7 @@ const ACTION_ITEMS: PaletteItem[] = [
   { type: "action", subtype: "add_internal_note",   label: "Nota interna",           description: "Añade una nota visible solo a agentes", icon: StickyNote,color: "text-yellow-400" },
   { type: "action", subtype: "wait_delay",          label: "Esperar",                description: "Pausa el flujo por un tiempo",          icon: Clock,     color: "text-slate-400" },
   { type: "action", subtype: "ai_reply",            label: "Respuesta IA",           description: "Responde usando IA generativa",         icon: Bot,       color: "text-[#10b981]" },
+  { type: "action", subtype: "sales_assistant",     label: "Asistente comercial",    description: "Funnel de reservas: valoración o clase de prueba", icon: Bot, color: "text-[#10b981]" },
   { type: "action", subtype: "ai_classify_intent",  label: "Clasificar intención",   description: "Clasifica el mensaje con IA",           icon: Brain,     color: "text-[#10b981]" },
   { type: "action", subtype: "update_lead_score",   label: "Actualizar lead score",  description: "Suma o resta puntos al lead score",     icon: TrendingUp,color: "text-pink-400" },
   { type: "action", subtype: "add_to_segment",      label: "Añadir a segmento",      description: "Añade el contacto a un segmento",       icon: UserCheck, color: "text-indigo-400" },

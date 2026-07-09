@@ -30,6 +30,7 @@ import { QUEUE_NAMES } from "@/lib/queue/types";
 import { runSessionHealthCheck } from "@/lib/session/monitor";
 import { runCronAutomations, runNoResponseTimeouts, resumeOverdueScheduledTasks } from "@/lib/automation/cron-runner";
 import { scheduleIGTokenRefreshes } from "@/lib/meta/token-refresh";
+import { sendAppointmentReminders } from "@/lib/sales/reminders";
 import { createLogger } from "@/lib/observability/logger";
 import { recordFailure } from "@/lib/observability/dlq";
 import { captureQueueSnapshot, pruneOldSnapshots, recordJobCompleted } from "@/lib/observability/metrics";
@@ -410,6 +411,8 @@ async function start(): Promise<void> {
       runCronAutomations(),
       runNoResponseTimeouts(),
       resumeOverdueScheduledTasks(),
+      // Recordatorios de citas del asistente comercial (24 h / 1 h antes)
+      sendAppointmentReminders(),
       // Proactive Meta token refresh (long-lived IG tokens expire in 60 days).
       // Only when the IG workers are on — otherwise the jobs would have no consumer.
       ...(enableIG ? [scheduleIGTokenRefreshes()] : []),

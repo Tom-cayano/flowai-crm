@@ -360,6 +360,7 @@ const ACTION_OPTIONS: { value: ActionType; label: string }[] = [
   { value: "add_internal_note",      label: "Nota interna" },
   { value: "wait_delay",             label: "Esperar (delay)" },
   { value: "ai_reply",               label: "Respuesta IA" },
+  { value: "sales_assistant",        label: "Asistente comercial (reservas)" },
   { value: "ai_classify_intent",     label: "Clasificar intención" },
   { value: "update_lead_score",      label: "Actualizar lead score" },
   { value: "add_to_segment",         label: "Añadir a segmento" },

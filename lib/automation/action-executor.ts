@@ -307,6 +307,25 @@ export async function executeAction(
         await log("info", "Workflow finalizado");
         return { ok: true };
 
+      // ── Asistente comercial (funnel de reservas) ──────────────────────────
+      case "sales_assistant": {
+        const { runSalesAssistant } = await import("@/lib/sales/assistant");
+        const result = await runSalesAssistant(ctx, (level, message) => log(level, message));
+
+        if (result.handled) {
+          return { ok: true, variables: { "sales.handled": true, "sales.detail": result.detail } };
+        }
+
+        // Sin intención comercial: fallback opcional a la IA conversacional
+        if (action.fallback === "ai") {
+          await log("info", `Asistente no aplicó (${result.detail}) — fallback a ai_reply`);
+          return executeAction({ type: "ai_reply" }, ctx, log);
+        }
+
+        await log("info", `Asistente comercial no intervino: ${result.detail}`);
+        return { ok: true, variables: { "sales.handled": false } };
+      }
+
       // send_template is a future extension — treat as no-op for now
       case "send_template":
         await log("warn", "send_template aún no implementado");

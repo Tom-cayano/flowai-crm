@@ -995,6 +995,64 @@ export interface Database {
         };
         Relationships: [];
       };
+      appointments: {
+        Row: {
+          id: string;
+          user_id: string;
+          contact_id: string | null;
+          conversation_id: string | null;
+          kind: "valoracion_video" | "valoracion_llamada" | "clase_prueba";
+          scheduled_at: string;
+          duration_minutes: number;
+          status: "confirmed" | "completed" | "cancelled" | "no_show";
+          contact_name: string;
+          contact_phone: string;
+          goal: string | null;
+          lead_source: string | null;
+          calendar_event_id: string | null;
+          meet_link: string | null;
+          reminder_24h_sent_at: string | null;
+          reminder_1h_sent_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          contact_id?: string | null;
+          conversation_id?: string | null;
+          kind: "valoracion_video" | "valoracion_llamada" | "clase_prueba";
+          scheduled_at: string;
+          duration_minutes?: number;
+          status?: "confirmed" | "completed" | "cancelled" | "no_show";
+          contact_name?: string;
+          contact_phone?: string;
+          goal?: string | null;
+          lead_source?: string | null;
+          calendar_event_id?: string | null;
+          meet_link?: string | null;
+          reminder_24h_sent_at?: string | null;
+          reminder_1h_sent_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          kind?: "valoracion_video" | "valoracion_llamada" | "clase_prueba";
+          scheduled_at?: string;
+          duration_minutes?: number;
+          status?: "confirmed" | "completed" | "cancelled" | "no_show";
+          contact_name?: string;
+          contact_phone?: string;
+          goal?: string | null;
+          lead_source?: string | null;
+          calendar_event_id?: string | null;
+          meet_link?: string | null;
+          reminder_24h_sent_at?: string | null;
+          reminder_1h_sent_at?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       webhook_integrations: {
         Row: {
           id: string;

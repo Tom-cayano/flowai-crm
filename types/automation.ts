@@ -130,6 +130,7 @@ export type ActionType =
   | "send_webhook"
   | "human_handoff"
   | "end_workflow"
+  | "sales_assistant"          // asistente comercial (funnel de reservas)
   // ─── Instagram actions ───────────────────────────────────────────────────
   | "send_instagram_dm"        // send/reply via Instagram DM
   | "reply_instagram_comment"  // reply to a specific comment publicly
@@ -272,6 +273,16 @@ export interface SendMessengerMessageAction {
   delayMs?: number;
 }
 
+export interface SalesAssistantAction {
+  type: "sales_assistant";
+  /**
+   * Fallback cuando el asistente no detecta intención comercial:
+   *   "none" (por defecto) — no responde (conversaciones normales intactas)
+   *   "ai"                 — delega en ai_reply
+   */
+  fallback?: "none" | "ai";
+}
+
 export type ActionConfig =
   | SendMessageAction
   | SendTemplateAction
@@ -290,6 +301,7 @@ export type ActionConfig =
   | SendWebhookAction
   | HumanHandoffAction
   | EndWorkflowAction
+  | SalesAssistantAction
   | SendInstagramDMAction
   | ReplyInstagramCommentAction
   | AssignInstagramLeadAction

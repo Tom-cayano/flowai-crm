@@ -57,13 +57,16 @@ export const dynamic = "force-dynamic";
 //   https://api.instagram.com/oauth/authorize (Instagram Login API, different product)
 //
 const IG_SCOPES = [
-  "instagram_basic",            // read IG profile linked to a Facebook Page
-  "instagram_manage_messages",  // send/receive DMs via Messenger Platform
-  "pages_show_list",            // list Facebook Pages the user manages
-  "pages_read_engagement",      // read Page engagement metrics
-  "pages_manage_metadata",      // subscribe Page to webhook events
-  "pages_messaging",            // subscribe Page to receive messages webhooks
-  // instagram_manage_comments removed — requires App Review approval
+  "instagram_basic",             // read IG profile linked to a Facebook Page
+  "instagram_manage_messages",   // send/receive DMs via Messenger Platform
+  "instagram_manage_comments",   // read/reply to comments on posts & reels
+  "pages_show_list",             // list Facebook Pages the user manages
+  "pages_read_engagement",       // read Page engagement metrics
+  "pages_manage_metadata",       // subscribe Page to webhook events
+  "pages_messaging",             // subscribe Page to receive messages webhooks
+  // NOTE: instagram_manage_comments is granted at Standard Access without review
+  // (works for app roles/testers); App Review is only needed for Advanced Access
+  // to reach the general public. It MUST be requested here to be reviewable.
 ].join(",");
 
 export async function GET(): Promise<NextResponse> {

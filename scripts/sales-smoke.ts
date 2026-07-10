@@ -32,7 +32,14 @@ async function main() {
   const db = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { persistSession: false }, realtime: { params: {} } },
+    {
+      auth: { persistSession: false },
+      // Node.js 20 no trae WebSocket nativo; supabase-js lo exige al construir
+      // el cliente realtime. Node 22+ ya lo trae y no necesita el transport.
+      realtime: typeof globalThis.WebSocket === "undefined"
+        ? { transport: require("ws") }
+        : {},
+    },
   );
 
   // 1. Endpoint puente vivo

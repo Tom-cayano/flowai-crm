@@ -1,53 +1,68 @@
-// Asistente comercial de Love Fitness Murcia / Transforma Fit Coach.
+// Recepcionista comercial de doble negocio sobre un único WhatsApp:
+//   • LOVE FITNESS MURCIA  (presencial / context "gym")
+//   • TRANSFORMA FIT COACH (online     / context "online")
 //
-// Máquina de estados determinista cuyo objetivo es cerrar una reserva
-// (valoración gratuita online o clase de prueba presencial) en ≤5 mensajes:
+// Detecta automáticamente el negocio, recuerda el contexto en
+// contacts.custom_fields y NUNCA mezcla respuestas de ambos. Cierra ventas
+// con el enlace correcto de cada negocio. Determinista (no depende de OpenAI):
+//   - Gimnasio: info de planes, clase de prueba con horario abierto (el equipo
+//     confirma disponibilidad), inscripción → lovefitness.es
+//   - Online: app/coach/nutrición, valoración gratuita con hueco reservable
+//     (Google Calendar), contratación → transformacuerpo.com
 //
-//   [entrada] → clasificar flujo (keywords / origen del lead)
-//   ONLINE:     saludo con nombre → 1️⃣ video / 2️⃣ llamada → huecos → reserva
-//   PRESENCIAL: pitch clase de prueba 10€ → huecos → reserva
-//
-// Reglas: mensajes breves, UNA pregunta por mensaje, opciones numeradas,
-// nunca pedir datos que ya tenemos, nunca ofrecer horarios ocupados.
-//
-// El estado del funnel vive en contacts.custom_fields (funnel_*) — sin
-// migraciones extra y visible desde el CRM. Cada paso queda en el historial
-// (automation_step_logs vía `log` + nota interna al reservar).
-//
-// Se ejecuta como acción `sales_assistant` del motor de automatizaciones.
+// Se ejecuta como acción del motor (nativa `sales_assistant` o vía el puente
+// /api/sales/run mientras el worker no tenga el código nuevo).
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { enqueueOutbound } from "@/lib/queue/producers";
 import type { ExecutionContext } from "@/types/automation";
 import type { Json } from "@/types/supabase";
 import {
-  classifyFlow,
-  detectInfoQuestion,
+  classifyBusiness,
+  mentionsOtherBusiness,
+  detectPurchaseIntent,
   detectSnooze,
+  detectInfoQuestion,
   parseNumericChoice,
   COPY,
   PRICING_TEXT,
   SCHEDULE_TEXT,
-  DIRECT_MENU,
-  PLAN_DETAILS,
-  AFTER_PLAN_CTA,
+  RECEPTION_GREETING,
+  AMBIGUITY_ASK,
+  GYM_MENU,
+  GYM_PLAN_DETAILS,
+  GYM_AFTER_PLAN,
+  GYM_TRIAL_PITCH,
+  GYM_TRIAL_CAPTURED,
+  GYM_CLOSE,
+  ONLINE_INFO,
+  ONLINE_CLOSE,
+  OBJECTIVE_QUESTION,
+  recommendPlan,
+  SWITCH_OFFER,
   SNOOZE_ASK,
   SNOOZE_CONFIRM,
-  type SalesFlow,
+  type BusinessContext,
 } from "./knowledge";
 import { getFreeSlots, formatSlot } from "./slots";
 import { createCalendarEvent } from "./google-calendar";
 
 type Logger = (level: "debug" | "info" | "warn" | "error", message: string) => Promise<void>;
 
-interface FunnelState {
-  funnel_flow?:    SalesFlow;
-  funnel_state?:   "awaiting_flow" | "awaiting_channel" | "awaiting_slot" | "booked"
-                 | "menu" | "after_plan" | "snooze_ask" | "snoozed";
-  funnel_channel?: "video" | "llamada";
-  funnel_slots?:   string[];   // ISO de los huecos ofrecidos (índice = opción-1)
+type FunnelState =
+  | "reception" | "switch_offer"
+  | "gym_menu" | "gym_after_plan" | "gym_trial_when" | "gym_advisor" | "gym_trial_pending"
+  | "online_info" | "awaiting_channel" | "awaiting_slot" | "online_advisor"
+  | "booked" | "snooze_ask" | "snoozed";
+
+interface Funnel {
+  funnel_context?:  BusinessContext;         // memoria del negocio activo
+  funnel_state?:    FunnelState;
+  funnel_channel?:  "video" | "llamada";     // online: canal de la valoración
+  funnel_slots?:    string[];                // ISO de huecos ofrecidos
+  funnel_switch_to?: BusinessContext;        // destino del cambio de contexto
   funnel_appointment_id?: string;
-  snooze_until?:   string;     // ISO — re-engagement automático
+  snooze_until?:    string;
 }
 
 export interface SalesAssistantResult {
@@ -62,7 +77,6 @@ export async function runSalesAssistant(
   log: Logger
 ): Promise<SalesAssistantResult> {
   const db = createAdminClient();
-
   if (!ctx.contactId) return { handled: false, detail: "sin contacto" };
 
   const { data: contact } = await db
@@ -70,306 +84,321 @@ export async function runSalesAssistant(
     .select("id, name, email, phone, tags, source, custom_fields")
     .eq("id", ctx.contactId)
     .maybeSingle();
-
   if (!contact) return { handled: false, detail: "contacto no encontrado" };
 
-  const custom = (contact.custom_fields ?? {}) as Record<string, unknown> & FunnelState;
-  const text   = ctx.incomingText ?? "";
-  const firstName = (contact.name ?? "").trim().split(/\s+/)[0] || "";
-
-  // ── Mensajería saliente por la cola estándar (rate limit + anti-ban) ──────
-  const reply = async (content: string): Promise<void> => {
-    await enqueueOutbound({
-      instanceName:   ctx.instanceName,
-      serverUrl:      ctx.serverUrl,
-      apiKey:         ctx.instanceApiKey,
-      phone:          ctx.phone,
-      content,
-      type:           "text",
-      conversationId: ctx.conversationId ?? "",
-      userId:         ctx.userId,
-      origin:         "automation",
-      agentName:      "Love Fitness",
-    });
-  };
-
-  const saveFunnel = async (patch: FunnelState): Promise<void> => {
-    await db
-      .from("contacts")
-      .update({ custom_fields: { ...custom, ...patch } as Json })
-      .eq("id", contact.id);
-    Object.assign(custom, patch);
-  };
-
-  const addTags = async (tags: string[]): Promise<void> => {
-    const merged = [...new Set([...(contact.tags ?? []), ...tags])];
-    await db.from("contacts").update({ tags: merged }).eq("id", contact.id);
-  };
-
-  // ── Flujo 3: clientes existentes — el asistente comercial no interviene ───
+  // Clientes existentes: el recepcionista comercial no interviene.
   if ((contact.tags ?? []).includes("cliente")) {
     return { handled: false, detail: "cliente existente — sin venta automática" };
   }
 
-  // ── Estado actual ──────────────────────────────────────────────────────────
-  let state = custom.funnel_state ?? null;
-  let flow: SalesFlow | null = custom.funnel_flow ?? null;
+  const custom = (contact.custom_fields ?? {}) as Record<string, unknown> & Funnel;
+  const text   = ctx.incomingText ?? "";
+  const firstName = (contact.name ?? "").trim().split(/\s+/)[0] || "";
 
-  // ── Recuperación de leads: "ahora no puedo / más adelante" — no insistir ──
+  const reply = (content: string) =>
+    enqueueOutbound({
+      instanceName: ctx.instanceName, serverUrl: ctx.serverUrl, apiKey: ctx.instanceApiKey,
+      phone: ctx.phone, content, type: "text", conversationId: ctx.conversationId ?? "",
+      userId: ctx.userId, origin: "automation", agentName: "Recepción",
+    });
+
+  const saveFunnel = async (patch: Funnel): Promise<void> => {
+    await db.from("contacts").update({ custom_fields: { ...custom, ...patch } as Json }).eq("id", contact.id);
+    Object.assign(custom, patch);
+  };
+  const addTags = async (tags: string[]): Promise<void> => {
+    const merged = [...new Set([...(contact.tags ?? []), ...tags])];
+    await db.from("contacts").update({ tags: merged }).eq("id", contact.id);
+  };
+  const note = async (body: string): Promise<void> => {
+    if (!ctx.conversationId) return;
+    await db.from("messages").insert({
+      conversation_id: ctx.conversationId, content: `[Nota interna] ${body}`,
+      type: "text", sender: "agent", status: "sent", agent_name: "FlowAI",
+    });
+  };
+
+  let state   = custom.funnel_state ?? null;
+  let context = custom.funnel_context ?? null;
+
+  // ── Recuperación de leads (no insistir) ────────────────────────────────────
   if (state !== "booked" && state !== "snooze_ask" && detectSnooze(text)) {
     await reply(SNOOZE_ASK);
     await saveFunnel({ funnel_state: "snooze_ask" });
-    await log("info", "Lead pide posponer — preguntando mañana/semana");
+    await log("info", "Lead pospone — preguntando mañana/semana");
     return { handled: true, detail: "snooze:preguntado" };
   }
-
   if (state === "snooze_ask") {
     const choice = parseNumericChoice(text, 2);
-    const days   = choice === 2 ? 7 : 1; // por defecto mañana
-    const until  = new Date(Date.now() + days * 86_400_000);
-    until.setUTCHours(9, 0, 0, 0); // ~10-11h Madrid
+    const days   = choice === 2 ? 7 : 1;
+    const until  = new Date(Date.now() + days * 86_400_000); until.setUTCHours(9, 0, 0, 0);
     await reply(SNOOZE_CONFIRM(days === 1 ? "mañana" : "la semana que viene"));
     await saveFunnel({ funnel_state: "snoozed", snooze_until: until.toISOString() });
     await addTags(["seguimiento-programado"]);
-    await log("info", `Seguimiento programado para ${until.toISOString()}`);
     return { handled: true, detail: `snooze:${days}d` };
   }
+  if (state === "snoozed") { await saveFunnel({ funnel_state: undefined, snooze_until: undefined }); state = null; }
 
-  if (state === "snoozed") {
-    // El lead vuelve a escribir por su cuenta → retomar el funnel desde cero
-    await saveFunnel({ funnel_state: undefined, snooze_until: undefined, funnel_flow: undefined });
-    state = null;
-    flow  = null;
-  }
-
-  // Lead del webhook (Transforma Fit Coach): el saludo online ya se envió en
-  // la automatización de nuevo lead → su primera respuesta es la elección
-  // de canal.
+  // ── Lead de Transforma Fit Coach (webhook): contexto online directo ────────
   if (!state && contact.source === "transforma-fit-coach") {
-    flow  = "online";
-    state = "awaiting_channel";
-    await saveFunnel({ funnel_flow: "online", funnel_state: "awaiting_channel" });
+    context = "online";
+    await saveFunnel({ funnel_context: "online", funnel_state: "awaiting_channel" });
+    await reply(COPY.onlineGreeting(firstName || "¡bienvenido/a!"));
+    await addTags(["cliente-potencial", "funnel-online"]);
+    await log("info", "Lead Transforma → valoración online (canal)");
+    return { handled: true, detail: "online:saludo" };
   }
 
-  // ── Sin estado: clasificar el flujo por el mensaje ────────────────────────
+  // ── ENTRADA sin estado: clasificar negocio o saludar como recepcionista ────
   if (!state) {
-    const detected = classifyFlow(text);
-    if (!detected) {
-      // Sin señal comercial: no intervenimos (podría ser un cliente actual
-      // u otra conversación) — la automatización decide el fallback.
-      return { handled: false, detail: "sin intención comercial detectada" };
+    const biz = classifyBusiness(text);
+    if (!biz) {
+      await reply(RECEPTION_GREETING);
+      await saveFunnel({ funnel_state: "reception" });
+      await addTags(["cliente-potencial", "lead-nuevo"]);
+      await log("info", "Recepción — saludo doble negocio");
+      return { handled: true, detail: "reception:saludo" };
     }
-    if (detected === "online") {
-      await reply(COPY.onlineGreeting(firstName || "¡bienvenido/a!"));
-      await saveFunnel({ funnel_flow: "online", funnel_state: "awaiting_channel" });
-      await addTags(["cliente-potencial", "funnel-online"]);
-      await log("info", "Funnel ONLINE iniciado — saludo + elección de canal enviados");
-      return { handled: true, detail: "online:saludo" };
-    }
-    // Flujo 2 (WhatsApp directo): menú de 6 opciones
-    await reply(DIRECT_MENU);
-    await saveFunnel({ funnel_flow: "presencial", funnel_state: "menu" });
-    await addTags(["cliente-potencial", "lead-nuevo", "funnel-presencial"]);
-    await log("info", "WhatsApp directo — menú de información enviado");
-    return { handled: true, detail: "directo:menu" };
+    return enterBusiness(biz);
   }
 
-  // ── Menú de WhatsApp directo ──────────────────────────────────────────────
-  if (state === "menu" || state === "after_plan") {
-    let choice = parseNumericChoice(text, state === "menu" ? 6 : 2);
-
-    if (state === "after_plan") {
-      if (choice === 2) {
-        await reply(DIRECT_MENU);
-        await saveFunnel({ funnel_state: "menu" });
-        return { handled: true, detail: "menu:reenviado" };
-      }
-      choice = choice === 1 ? 6 : null; // 1 = reservar clase de prueba
+  // ── RECEPCIÓN: elegir 1 gimnasio / 2 online ────────────────────────────────
+  if (state === "reception") {
+    const c = parseNumericChoice(text, 2);
+    if (c === null) {
+      const biz = classifyBusiness(text);
+      if (biz) return enterBusiness(biz);
+      await reply(AMBIGUITY_ASK);
+      return { handled: true, detail: "reception:reask" };
     }
-
-    if (choice === null) {
-      await reply(COPY.fallbackNudge + "\n\n" + DIRECT_MENU);
-      await saveFunnel({ funnel_state: "menu" });
-      return { handled: true, detail: "menu:reask" };
-    }
-
-    if (choice >= 1 && choice <= 4) {
-      if (choice === 4) {
-        // Entrenamiento online → funnel de valoración gratuita
-        await reply(COPY.onlineGreeting(firstName || "¡bienvenido/a!"));
-        await saveFunnel({ funnel_flow: "online", funnel_state: "awaiting_channel" });
-        await addTags(["funnel-online"]);
-        await log("info", "Menú → entrenamiento online → funnel de valoración");
-        return { handled: true, detail: "menu:online" };
-      }
-      await reply(PLAN_DETAILS[choice]!);
-      await reply(AFTER_PLAN_CTA);
-      await saveFunnel({ funnel_state: "after_plan" });
-      await log("info", `Menú → plan ${choice} enviado + CTA clase de prueba`);
-      return { handled: true, detail: `menu:plan-${choice}` };
-    }
-
-    if (choice === 5) {
-      await reply(SCHEDULE_TEXT);
-      await reply(AFTER_PLAN_CTA);
-      await saveFunnel({ funnel_state: "after_plan" });
-      await log("info", "Menú → horarios enviados + CTA");
-      return { handled: true, detail: "menu:horarios" };
-    }
-
-    // 6 → clase de prueba: pitch + huecos
-    const slots = await getFreeSlots(ctx.userId);
-    await reply(COPY.presencialPitch);
-    if (slots.length === 0) {
-      await reply("Esta semana está completa 😅 Un compañero te escribirá para buscarte hueco.");
-      await addTags(["seguimiento-manual"]);
-      await log("warn", "Clase de prueba sin huecos — derivado a seguimiento manual");
-      return { handled: true, detail: "presencial:sin-huecos" };
-    }
-    await reply(COPY.askSlot(slots.map((s) => s.label)));
-    await saveFunnel({
-      funnel_state: "awaiting_slot",
-      funnel_slots: slots.map((s) => s.at.toISOString()),
-    });
-    await log("info", `Clase de prueba — pitch + ${slots.length} huecos ofrecidos`);
-    return { handled: true, detail: "presencial:pitch+huecos" };
+    return enterBusiness(c === 1 ? "gym" : "online");
   }
 
-  // ── Preguntas de información en cualquier punto: responder y reconducir ───
-  const info = detectInfoQuestion(text);
-  if (info && state !== "awaiting_slot") {
-    await reply(info === "precios" ? PRICING_TEXT : SCHEDULE_TEXT);
-    await log("info", `Pregunta de ${info} respondida (estado ${state})`);
-    if (state === "awaiting_channel") await reply(COPY.reofferChannel);
-    if (state === "booked")           await reply(COPY.afterBooked);
-    return { handled: true, detail: `info:${info}` };
+  // ── CAMBIO DE CONTEXTO ─────────────────────────────────────────────────────
+  const inBooking = state === "awaiting_slot" || state === "awaiting_channel" || state === "gym_trial_when";
+  if (state === "switch_offer") {
+    const c = parseNumericChoice(text, 2);
+    if (c === 1) {
+      const target = custom.funnel_switch_to ?? (context === "gym" ? "online" : "gym");
+      return enterBusiness(target);
+    }
+    // No → seguir en el negocio actual
+    return enterBusiness(context ?? "gym");
+  }
+  if (context && !inBooking && mentionsOtherBusiness(text, context)) {
+    await reply(SWITCH_OFFER(context));
+    await saveFunnel({ funnel_state: "switch_offer", funnel_switch_to: context === "gym" ? "online" : "gym" });
+    await log("info", `Ofreciendo cambio de contexto desde ${context}`);
+    return { handled: true, detail: "switch:offer" };
   }
 
-  // ── ONLINE: elección de canal ─────────────────────────────────────────────
-  if (state === "awaiting_channel") {
-    const choice = parseNumericChoice(text, 2);
-    if (choice === null) {
-      await reply(COPY.reofferChannel);
-      await log("info", "Elección de canal no reconocida — opciones reenviadas");
-      return { handled: true, detail: "online:reask-canal" };
-    }
-    const channel = choice === 1 ? "video" : "llamada";
-    const slots = await getFreeSlots(ctx.userId);
-    if (slots.length === 0) {
-      await reply("Esta semana está completa 😅 Un compañero te escribirá para buscarte hueco.");
-      await addTags(["seguimiento-manual"]);
-      await log("warn", "Funnel ONLINE sin huecos libres — derivado a seguimiento manual");
-      return { handled: true, detail: "online:sin-huecos" };
-    }
-    await reply(COPY.askSlot(slots.map((s) => s.label)));
-    await saveFunnel({
-      funnel_channel: channel,
-      funnel_state: "awaiting_slot",
-      funnel_slots: slots.map((s) => s.at.toISOString()),
-    });
-    await log("info", `Canal elegido: ${channel} — ${slots.length} huecos ofrecidos`);
-    return { handled: true, detail: `online:canal-${channel}` };
+  // ── CIERRE DE VENTA (solo con intención clara y contexto establecido) ──────
+  if (context && !inBooking && detectPurchaseIntent(text)) {
+    await reply(context === "gym" ? GYM_CLOSE : ONLINE_CLOSE);
+    await addTags(["lead-caliente", context === "gym" ? "cierre-gym" : "cierre-online"]);
+    await log("info", `Cierre de venta ${context} — enlace enviado`);
+    return { handled: true, detail: `close:${context}` };
   }
 
-  // ── Elección de hueco y reserva ───────────────────────────────────────────
-  if (state === "awaiting_slot") {
-    const offered = (custom.funnel_slots ?? []).map((iso) => new Date(iso));
-    const choice  = parseNumericChoice(text, offered.length);
-
-    if (choice === null || !offered[choice - 1]) {
-      // Puede ser una pregunta de info justo antes de elegir
-      if (info) {
+  // ════════════════ FLUJO GIMNASIO (Love Fitness) ════════════════
+  if (context === "gym") {
+    if (state === "gym_menu" || state === "gym_after_plan") {
+      let c = parseNumericChoice(text, state === "gym_menu" ? 5 : 2);
+      // Preguntas sueltas de precio/horario
+      const info = detectInfoQuestion(text);
+      if (c === null && info) {
         await reply(info === "precios" ? PRICING_TEXT : SCHEDULE_TEXT);
+        await reply(GYM_AFTER_PLAN);
+        await saveFunnel({ funnel_state: "gym_after_plan" });
+        return { handled: true, detail: `gym:info-${info}` };
       }
+      if (/recomienda|recomiendas|cual me|cuál me|no se cual|no sé cuál|ayuda a elegir|que plan me/i.test(text)) {
+        await reply(OBJECTIVE_QUESTION);
+        await saveFunnel({ funnel_state: "gym_advisor" });
+        return { handled: true, detail: "gym:advisor-inicio" };
+      }
+      if (state === "gym_after_plan") {
+        if (c === 1) return gymTrial();
+        if (c === 2) { await reply(GYM_MENU); await saveFunnel({ funnel_state: "gym_menu" }); return { handled: true, detail: "gym:menu" }; }
+        c = null;
+      }
+      if (c === null) { await reply(COPY.fallbackNudge + "\n\n" + GYM_MENU); await saveFunnel({ funnel_state: "gym_menu" }); return { handled: true, detail: "gym:reask" }; }
+      if (c >= 1 && c <= 3) {
+        await reply(GYM_PLAN_DETAILS[c]!);
+        await reply(GYM_AFTER_PLAN);
+        await saveFunnel({ funnel_state: "gym_after_plan" });
+        await log("info", `Gym → plan ${c}`);
+        return { handled: true, detail: `gym:plan-${c}` };
+      }
+      if (c === 4) { await reply(SCHEDULE_TEXT); await reply(GYM_AFTER_PLAN); await saveFunnel({ funnel_state: "gym_after_plan" }); return { handled: true, detail: "gym:horarios" }; }
+      // c === 5
+      return gymTrial();
+    }
+
+    if (state === "gym_trial_when") {
+      // Horario abierto: capturamos la preferencia libre y confirmación manual.
+      await addTags(["clase-prueba-solicitada", "lead-caliente", "seguimiento-manual"]);
+      await note(`🏋️ Clase de prueba solicitada — ${contact.name || ctx.phone}. Preferencia del cliente: "${text}". Confirmar disponibilidad de monitor.`);
+      if (ctx.conversationId) await db.from("conversations").update({ status: "pending" }).eq("id", ctx.conversationId);
+      await reply(GYM_TRIAL_CAPTURED(firstName));
+      await saveFunnel({ funnel_state: "gym_trial_pending" });
+      await log("info", "Gym clase de prueba — preferencia capturada, confirmación manual");
+      return { handled: true, detail: "gym:trial-capturado" };
+    }
+
+    if (state === "gym_advisor") {
+      const obj = parseNumericChoice(text, 5);
+      if (obj === null) { await reply(OBJECTIVE_QUESTION); return { handled: true, detail: "gym:advisor-reask" }; }
+      await reply(recommendPlan("gym", obj));
+      await saveFunnel({ funnel_state: "gym_after_plan" });
+      await log("info", `Gym asesor → objetivo ${obj}`);
+      return { handled: true, detail: `gym:advisor-${obj}` };
+    }
+
+    if (state === "gym_trial_pending" || state === "booked") {
+      await reply("Un monitor te confirma enseguida 😊 Si necesitas algo más, dímelo por aquí.");
+      return { handled: true, detail: "gym:pending" };
+    }
+
+    // fallback dentro de gym
+    await reply(GYM_MENU); await saveFunnel({ funnel_state: "gym_menu" });
+    return { handled: true, detail: "gym:fallback-menu" };
+  }
+
+  // ════════════════ FLUJO ONLINE (Transforma) ════════════════
+  if (context === "online") {
+    if (state === "online_info") {
+      const c = parseNumericChoice(text, 2);
+      if (c === 1) return onlineOfferChannel();
+      if (c === 2) { await reply(OBJECTIVE_QUESTION); await saveFunnel({ funnel_state: "online_advisor" }); return { handled: true, detail: "online:advisor-inicio" }; }
+      await reply(COPY.fallbackNudge + "\n\n" + ONLINE_INFO);
+      return { handled: true, detail: "online:reask" };
+    }
+
+    if (state === "online_advisor") {
+      const obj = parseNumericChoice(text, 5);
+      if (obj === null) { await reply(OBJECTIVE_QUESTION); return { handled: true, detail: "online:advisor-reask" }; }
+      await reply(recommendPlan("online", obj));
+      await saveFunnel({ funnel_state: "online_info" });
+      await log("info", `Online asesor → objetivo ${obj}`);
+      return { handled: true, detail: `online:advisor-${obj}` };
+    }
+
+    if (state === "awaiting_channel") {
+      const c = parseNumericChoice(text, 2);
+      if (c === null) { await reply(COPY.reofferChannel); return { handled: true, detail: "online:reask-canal" }; }
+      const channel: "video" | "llamada" = c === 1 ? "video" : "llamada";
       const slots = await getFreeSlots(ctx.userId);
-      if (slots.length > 0) {
-        await reply(COPY.askSlot(slots.map((s) => s.label)));
-        await saveFunnel({ funnel_slots: slots.map((s) => s.at.toISOString()) });
-      } else {
-        await reply(COPY.fallbackNudge);
+      if (slots.length === 0) {
+        await reply("Esta semana está completa 😅 Un compañero te escribirá para buscarte hueco.");
+        await addTags(["seguimiento-manual"]);
+        return { handled: true, detail: "online:sin-huecos" };
       }
-      await log("info", "Elección de hueco no reconocida — huecos reenviados");
-      return { handled: true, detail: "reask-hueco" };
+      await reply(COPY.askSlot(slots.map((s) => s.label)));
+      await saveFunnel({ funnel_channel: channel, funnel_state: "awaiting_slot", funnel_slots: slots.map((s) => s.at.toISOString()) });
+      await log("info", `Online canal ${channel} — ${slots.length} huecos`);
+      return { handled: true, detail: `online:canal-${channel}` };
     }
 
-    const chosen = offered[choice - 1];
-    return bookAppointment({ ctx, db, log, reply, saveFunnel, addTags, contact, custom, flow: flow ?? "presencial", chosen });
-  }
-
-  // ── Ya reservado ──────────────────────────────────────────────────────────
-  if (state === "booked") {
-    if (/\b(cancelar|cambiar|anular|no puedo|reprogramar)\b/i.test(text)) {
-      await addTags(["seguimiento-manual"]);
-      if (ctx.conversationId) {
-        await db.from("conversations")
-          .update({ status: "pending" })
-          .eq("id", ctx.conversationId);
+    if (state === "awaiting_slot") {
+      const offered = (custom.funnel_slots ?? []).map((iso) => new Date(iso));
+      const choice  = parseNumericChoice(text, offered.length);
+      if (choice === null || !offered[choice - 1]) {
+        const slots = await getFreeSlots(ctx.userId);
+        if (slots.length > 0) { await reply(COPY.askSlot(slots.map((s) => s.label))); await saveFunnel({ funnel_slots: slots.map((s) => s.at.toISOString()) }); }
+        else await reply(COPY.fallbackNudge);
+        return { handled: true, detail: "online:reask-hueco" };
       }
-      await reply("Sin problema 😊 Un compañero del equipo te escribe ahora mismo para recolocar tu cita.");
-      await log("info", "Cliente pide cambiar/cancelar — derivado a seguimiento manual");
-      return { handled: true, detail: "booked:cambio-solicitado" };
+      return bookAppointment({ ctx, db, log, reply, saveFunnel, addTags, contact, custom, chosen: offered[choice - 1] });
     }
-    await reply(COPY.afterBooked);
-    return { handled: true, detail: "booked:recordatorio-cita" };
+
+    if (state === "booked") {
+      if (/\b(cancelar|cambiar|anular|reprogramar)\b/i.test(text)) {
+        await addTags(["seguimiento-manual"]);
+        if (ctx.conversationId) await db.from("conversations").update({ status: "pending" }).eq("id", ctx.conversationId);
+        await reply("Sin problema 😊 Un compañero te escribe ahora mismo para recolocar tu cita.");
+        return { handled: true, detail: "online:cambio" };
+      }
+      await reply(COPY.afterBooked);
+      return { handled: true, detail: "online:recordatorio" };
+    }
+
+    // fallback dentro de online
+    await reply(ONLINE_INFO); await saveFunnel({ funnel_state: "online_info" });
+    return { handled: true, detail: "online:fallback-info" };
   }
 
-  return { handled: false, detail: `estado desconocido: ${state}` };
+  return { handled: false, detail: `estado sin contexto: ${state}` };
+
+  // ─── Helpers de negocio (cierres sobre el scope de runSalesAssistant) ──────
+
+  async function enterBusiness(biz: BusinessContext): Promise<SalesAssistantResult> {
+    context = biz;
+    if (biz === "gym") {
+      await reply(GYM_MENU);
+      await saveFunnel({ funnel_context: "gym", funnel_state: "gym_menu" });
+      await addTags(["cliente-potencial", "contexto-gimnasio"]);
+      await log("info", "Contexto → GIMNASIO");
+      return { handled: true, detail: "gym:menu" };
+    }
+    await reply(ONLINE_INFO);
+    await saveFunnel({ funnel_context: "online", funnel_state: "online_info" });
+    await addTags(["cliente-potencial", "contexto-online"]);
+    await log("info", "Contexto → ONLINE");
+    return { handled: true, detail: "online:info" };
+  }
+
+  async function gymTrial(): Promise<SalesAssistantResult> {
+    await reply(GYM_TRIAL_PITCH);
+    await saveFunnel({ funnel_state: "gym_trial_when" });
+    await addTags(["interes-clase-prueba"]);
+    await log("info", "Gym → clase de prueba (horario abierto)");
+    return { handled: true, detail: "gym:trial-pitch" };
+  }
+
+  async function onlineOfferChannel(): Promise<SalesAssistantResult> {
+    await reply(COPY.reofferChannel);
+    await saveFunnel({ funnel_state: "awaiting_channel" });
+    await addTags(["funnel-online"]);
+    await log("info", "Online → elección de canal de valoración");
+    return { handled: true, detail: "online:canal-pregunta" };
+  }
 }
 
-// ─── Reserva ──────────────────────────────────────────────────────────────────
+// ─── Reserva de valoración online (Google Calendar + CRM) ─────────────────────
 
 async function bookAppointment(opts: {
   ctx:        ExecutionContext;
   db:         ReturnType<typeof createAdminClient>;
   log:        Logger;
-  reply:      (content: string) => Promise<void>;
-  saveFunnel: (patch: FunnelState) => Promise<void>;
+  reply:      (content: string) => Promise<unknown>;
+  saveFunnel: (patch: Funnel) => Promise<void>;
   addTags:    (tags: string[]) => Promise<void>;
   contact:    { id: string; name: string; email: string | null; phone: string | null; source: string | null; custom_fields: Json };
-  custom:     Record<string, unknown> & FunnelState;
-  flow:       SalesFlow;
+  custom:     Record<string, unknown> & Funnel;
   chosen:     Date;
 }): Promise<SalesAssistantResult> {
-  const { ctx, db, log, reply, saveFunnel, addTags, contact, custom, flow, chosen } = opts;
+  const { ctx, db, log, reply, saveFunnel, addTags, contact, custom, chosen } = opts;
 
-  const kind =
-    flow === "presencial" ? "clase_prueba"
-    : custom.funnel_channel === "llamada" ? "valoracion_llamada"
-    : "valoracion_video";
-
+  const kind = custom.funnel_channel === "llamada" ? "valoracion_llamada" : "valoracion_video";
   const goal = typeof custom.goal === "string" ? custom.goal : null;
 
-  // 1. Reservar en el CRM — el índice único garantiza que nadie ocupa el
-  //    mismo hueco dos veces, aunque dos leads respondan a la vez.
   const { data: appt, error } = await db
     .from("appointments")
     .insert({
-      user_id:         ctx.userId,
-      contact_id:      contact.id,
-      conversation_id: ctx.conversationId,
-      kind,
-      scheduled_at:    chosen.toISOString(),
-      duration_minutes: kind === "clase_prueba" ? 60 : 15,
-      contact_name:    contact.name ?? "",
-      contact_phone:   contact.phone ?? ctx.phone,
-      goal,
-      lead_source:     contact.source,
+      user_id: ctx.userId, contact_id: contact.id, conversation_id: ctx.conversationId,
+      kind, scheduled_at: chosen.toISOString(), duration_minutes: 15,
+      contact_name: contact.name ?? "", contact_phone: contact.phone ?? ctx.phone,
+      goal, lead_source: contact.source,
     })
-    .select("id")
-    .single();
+    .select("id").single();
 
   if (error) {
     if (error.code === "23505") {
-      // Doble reserva evitada — reofrecer huecos actualizados
       const slots = await getFreeSlots(ctx.userId);
-      if (slots.length > 0) {
-        await reply(`${COPY.slotTaken}\n` + COPY.askSlot(slots.map((s) => s.label)).split("\n").slice(1).join("\n"));
-        await saveFunnel({ funnel_slots: slots.map((s) => s.at.toISOString()) });
-      } else {
-        await reply("Esta semana está completa 😅 Un compañero te escribirá para buscarte hueco.");
-        await addTags(["seguimiento-manual"]);
-      }
-      await log("warn", `Doble reserva evitada en ${chosen.toISOString()} — huecos reenviados`);
+      if (slots.length > 0) { await reply(`${COPY.slotTaken}\n` + COPY.askSlot(slots.map((s) => s.label)).split("\n").slice(1).join("\n")); await saveFunnel({ funnel_slots: slots.map((s) => s.at.toISOString()) }); }
+      else { await reply("Esta semana está completa 😅 Un compañero te escribirá para buscarte hueco."); await addTags(["seguimiento-manual"]); }
+      await log("warn", `Doble reserva evitada en ${chosen.toISOString()}`);
       return { handled: true, detail: "hueco-ocupado" };
     }
     await log("error", `No se pudo crear la cita: ${error.message}`);
@@ -378,32 +407,21 @@ async function bookAppointment(opts: {
     return { handled: true, detail: "error-reserva" };
   }
 
-  // 2. Google Calendar (+ Meet si videollamada) — soft-fail
-  const kindLabel =
-    kind === "clase_prueba" ? "Clase de prueba" :
-    kind === "valoracion_video" ? "Valoración gratuita (videollamada)" : "Valoración gratuita (llamada)";
-
+  const kindLabel = kind === "valoracion_video" ? "Valoración gratuita (videollamada)" : "Valoración gratuita (llamada)";
   const cal = await createCalendarEvent({
-    summary:     `${kindLabel} — ${contact.name || ctx.phone}`,
+    summary: `${kindLabel} — ${contact.name || ctx.phone}`,
     description:
-      `Reserva automática del asistente de FlowAI CRM\n` +
-      `Nombre: ${contact.name}\nTeléfono: ${contact.phone ?? ctx.phone}\n` +
-      `Objetivo: ${goal ?? "—"}\nOrigen: ${contact.source ?? "WhatsApp directo"}\nTipo: ${kindLabel}`,
-    start:       chosen,
-    durationMinutes: kind === "clase_prueba" ? 60 : 15,
-    attendeeEmail: contact.email,
-    withMeet:    kind === "valoracion_video",
+      `Reserva automática del asistente de FlowAI CRM\nNombre: ${contact.name}\n` +
+      `Teléfono: ${contact.phone ?? ctx.phone}\nObjetivo: ${goal ?? "—"}\n` +
+      `Origen: ${contact.source ?? "WhatsApp directo"}\nTipo: ${kindLabel}`,
+    start: chosen, durationMinutes: 15, attendeeEmail: contact.email,
+    withMeet: kind === "valoracion_video",
   });
-
   if (cal.eventId || cal.meetLink) {
-    await db.from("appointments")
-      .update({ calendar_event_id: cal.eventId, meet_link: cal.meetLink })
-      .eq("id", appt.id);
+    await db.from("appointments").update({ calendar_event_id: cal.eventId, meet_link: cal.meetLink }).eq("id", appt.id);
   }
 
-  // 3. CRM: etiquetas, estado y nota en el historial
-  const bookingTag = kind === "clase_prueba" ? "clase-prueba-reservada" : "valoracion-reservada";
-  await addTags([bookingTag, "lead-caliente"]);
+  await addTags(["valoracion-reservada", "lead-caliente"]);
   await saveFunnel({ funnel_state: "booked", funnel_appointment_id: appt.id, funnel_slots: [] });
 
   const fecha = formatSlot(chosen);
@@ -412,54 +430,28 @@ async function bookAppointment(opts: {
       conversation_id: ctx.conversationId,
       content: `[Nota interna] 📅 ${kindLabel} reservada para el ${fecha}` +
                (cal.meetLink ? ` · Meet: ${cal.meetLink}` : "") +
-               (cal.eventId ? " · evento creado en Google Calendar" : " · Google Calendar no configurado (solo CRM)"),
+               (cal.eventId ? " · Google Calendar" : " · Google Calendar no configurado (solo CRM)"),
       type: "text", sender: "agent", status: "sent", agent_name: "FlowAI",
     });
   }
 
-  // 4. Confirmación al cliente — WhatsApp + email (si tiene y el canal está activo)
-  await reply(
-    kind === "clase_prueba"
-      ? COPY.confirmPresencial(fecha)
-      : COPY.confirmOnline(fecha, kind === "valoracion_video" ? "video" : "llamada", cal.meetLink)
-  );
+  await reply(COPY.confirmOnline(fecha, kind === "valoracion_video" ? "video" : "llamada", cal.meetLink));
 
   if (contact.email) {
     const { queueEmail } = await import("@/lib/email/send");
-    const { data: tpl } = await db
-      .from("email_templates")
-      .select("subject, body_html")
-      .eq("user_id", ctx.userId)
-      .eq("slug", "reserva")
-      .maybeSingle();
+    const { data: tpl } = await db.from("email_templates").select("subject, body_html").eq("user_id", ctx.userId).eq("slug", "reserva").maybeSingle();
     if (tpl) {
       await queueEmail({
-        userId:         ctx.userId,
-        to:             contact.email,
-        subject:        tpl.subject,
-        bodyHtml:       tpl.body_html,
+        userId: ctx.userId, to: contact.email, subject: tpl.subject, bodyHtml: tpl.body_html,
         vars: {
-          nombre:    (contact.name ?? "").split(/\s+/)[0] ?? "",
-          tipo_cita: kindLabel.toLowerCase(),
-          fecha,
-          detalle: cal.meetLink
-            ? `Enlace de la videollamada: ${cal.meetLink}`
-            : kind === "clase_prueba"
-              ? "Te esperamos en Love Fitness Murcia. Trae ropa deportiva y agua."
-              : "Te llamaremos al teléfono que nos facilitaste.",
+          nombre: (contact.name ?? "").split(/\s+/)[0] ?? "", tipo_cita: kindLabel.toLowerCase(), fecha,
+          detalle: cal.meetLink ? `Enlace de la videollamada: ${cal.meetLink}` : "Te llamaremos al teléfono que nos facilitaste.",
         },
-        contactId:      contact.id,
-        conversationId: ctx.conversationId,
-        templateSlug:   "reserva",
-        origin:         "automation",
-      }).catch((err) => console.error("[sales] email de confirmación falló:", err));
+        contactId: contact.id, conversationId: ctx.conversationId, templateSlug: "reserva", origin: "automation",
+      }).catch((err) => console.error("[sales] email confirmación falló:", err));
     }
   }
 
-  await log("info",
-    `✅ ${kindLabel} reservada para ${fecha} (cita ${appt.id})` +
-    (cal.eventId ? " + Google Calendar" : "") + (cal.meetLink ? " + Meet" : "")
-  );
-
+  await log("info", `✅ ${kindLabel} reservada para ${fecha} (cita ${appt.id})`);
   return { handled: true, detail: `reservado:${kind}` };
 }

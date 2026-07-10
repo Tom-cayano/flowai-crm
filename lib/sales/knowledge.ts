@@ -212,3 +212,177 @@ export const KIND_LABEL: Record<string, string> = {
   valoracion_llamada: "tu valoración gratuita por teléfono",
   clase_prueba:       "tu clase de prueba",
 };
+
+// ════════════════════════════════════════════════════════════════════════════
+// RECEPCIONISTA DE DOBLE NEGOCIO (Love Fitness presencial · Transforma online)
+// Un único WhatsApp atiende ambos; el asistente detecta el negocio y NUNCA
+// mezcla respuestas. context "gym" = presencial, "online" = Transforma.
+// ════════════════════════════════════════════════════════════════════════════
+
+export type BusinessContext = "gym" | "online";
+
+/** Enlaces oficiales de cierre — uno por negocio, nunca cruzados. */
+export const LINKS = {
+  gym:    "https://www.lovefitness.es",
+  online: "https://www.transformacuerpo.com",
+} as const;
+
+// Señales específicas de cada negocio (por límite de palabra). Los términos
+// genéricos (hola, información, precio, me interesa, apuntarme) NO van aquí:
+// sin negocio claro se muestra el saludo del recepcionista.
+const GYM_SIGNALS = [
+  "gimnasio", "gym", "murcia", "presencial", "entrenamiento presencial",
+  "clase", "clases", "pesas", "monitor", "sala", "instalaciones",
+  "horario", "horarios", "clase de prueba", "grupal", "funcional",
+  "personal trainer", "entrenador personal",
+];
+
+const ONLINE_SIGNALS = [
+  "online", "app", "aplicacion", "aplicación", "coach", "seguimiento",
+  "nutricion", "nutrición", "transforma", "plan online", "planes online",
+  "entrenamiento online", "entrenador online", "reto", "suscripcion", "suscripción",
+];
+
+/** Detecta el negocio por señales específicas. null = ambiguo → recepción. */
+export function classifyBusiness(text: string): BusinessContext | null {
+  const t = normalize(text);
+  const gym    = GYM_SIGNALS.some((k) => matchesKeyword(t, k));
+  const online = ONLINE_SIGNALS.some((k) => matchesKeyword(t, k));
+  if (gym && !online) return "gym";
+  if (online && !gym) return "online";
+  return null; // ambos o ninguno → preguntar
+}
+
+/** ¿El mensaje contiene señales FUERTES del otro negocio? (cambio de contexto) */
+export function mentionsOtherBusiness(text: string, current: BusinessContext): boolean {
+  const t = normalize(text);
+  const other = current === "gym" ? ONLINE_SIGNALS : GYM_SIGNALS;
+  // Solo señales inequívocas para no cambiar de contexto por error
+  const strong = current === "gym"
+    ? ["online", "app", "coach", "transforma", "nutricion", "nutrición", "suscripcion", "suscripción", "entrenamiento online"]
+    : ["gimnasio", "presencial", "murcia", "clase de prueba", "instalaciones", "sala"];
+  return strong.some((k) => matchesKeyword(t, k)) && other.some((k) => matchesKeyword(t, k));
+}
+
+/**
+ * Intención CLARA de compra/contratación (para enviar el enlace).
+ * Solo pedir información NO cuenta — el enlace se envía únicamente aquí.
+ */
+export function detectPurchaseIntent(text: string): boolean {
+  const t = normalize(text);
+  return [
+    "quiero apuntarme", "apuntarme", "quiero inscribirme", "inscribirme",
+    "como me inscribo", "cómo me inscribo", "quiero empezar", "quiero reservar plaza",
+    "quiero contratar", "contratar", "quiero suscribirme", "suscribirme",
+    "como pago", "cómo pago", "quiero pagar", "darme de alta",
+  ].some((k) => matchesKeyword(t, k));
+}
+
+/** Afirmación breve: sí / vale / ok / claro / perfecto / me interesa. */
+export function detectYes(text: string): boolean {
+  const t = normalize(text);
+  return ["si", "sí", "vale", "ok", "okey", "claro", "perfecto", "genial",
+          "me interesa", "por supuesto", "adelante", "venga", "dale"].some((k) => matchesKeyword(t, k));
+}
+
+// ─── Copys del recepcionista ─────────────────────────────────────────────────
+
+export const RECEPTION_GREETING =
+  "👋 ¡Hola! Soy el asistente virtual de Love Fitness Murcia y Transforma Fit Coach.\n\n" +
+  "Estoy aquí para ayudarte a elegir la mejor opción según tus objetivos.\n\n" +
+  "¿Buscas información sobre:\n\n" +
+  "1️⃣ Nuestro gimnasio presencial en Murcia.\n\n" +
+  "2️⃣ Nuestros programas de entrenamiento online.";
+
+export const AMBIGUITY_ASK =
+  "¿Buscas información sobre el gimnasio presencial o sobre nuestros programas online?\n" +
+  "1️⃣ Gimnasio presencial\n2️⃣ Programas online";
+
+// ── LOVE FITNESS (gym) ──
+export const GYM_MENU =
+  "💪 ¡Genial! Te cuento sobre nuestro gimnasio en Murcia.\n\n" +
+  "¿Qué te gustaría saber?\n\n" +
+  "1️⃣ Entrenamiento grupal\n2️⃣ Entrenamiento funcional\n" +
+  "3️⃣ Personal Trainer\n4️⃣ Horarios e instalaciones\n5️⃣ Reservar clase de prueba";
+
+export const GYM_PLAN_DETAILS: Record<number, string> = {
+  1: "💪 *Entrenamiento grupal — 59€/mes*\nEntrenamientos de lunes a viernes.\nIncluye Open Box 24 h los 365 días.",
+  2: "🏃 *Entrenamiento funcional — 39,99€/mes*\n3 días por semana, guiados desde la App.\nNo incluye Open Box.",
+  3: "🎯 *Personal Trainer — desde 180€/mes*\n3 sesiones/semana + dieta + Tesla Slimming.\n⭐ Premium 250€/mes: 5 sesiones + horario flexible.",
+};
+
+export const GYM_AFTER_PLAN =
+  "¿Te gustaría venir a conocerlo?\n" +
+  "1️⃣ Reservar una clase de prueba\n2️⃣ Ver otro plan";
+
+export const GYM_TRIAL_PITCH =
+  "La clase de prueba tiene un coste de 10 €.\n\n" +
+  "Puedes realizarla en cualquier horario donde haya un monitor disponible.\n\n" +
+  "Indícanos qué día y qué franja horaria prefieres y te confirmaremos la disponibilidad.";
+
+export const GYM_TRIAL_CAPTURED = (nombre: string) =>
+  `¡Perfecto${nombre ? `, ${nombre}` : ""}! 😊 Tomo nota de tu preferencia.\n` +
+  "Un monitor te confirma enseguida la disponibilidad de tu clase de prueba. 💪";
+
+export const GYM_CLOSE =
+  "¡Genial! 😊\n\n" +
+  "Será un placer ayudarte a conseguir tus objetivos.\n\n" +
+  "Puedes realizar tu inscripción directamente aquí:\n\n" +
+  `${LINKS.gym}\n\n` +
+  "Si antes quieres que te ayude a elegir el plan más adecuado según tus objetivos, estaré encantado de ayudarte.";
+
+// ── TRANSFORMA FIT COACH (online) ──
+export const ONLINE_INFO =
+  "💻 En *Transforma Fit Coach* entrenas donde quieras con:\n\n" +
+  "• App con tus rutinas y seguimiento\n" +
+  "• Plan de nutrición personalizado\n" +
+  "• Un coach que ajusta tu progreso\n\n" +
+  "¿Qué prefieres?\n1️⃣ Reservar una valoración gratuita\n2️⃣ Que te recomiende el plan ideal";
+
+export const ONLINE_CLOSE =
+  "¡Perfecto! 💪\n\n" +
+  "Puedes contratar tu plan directamente desde:\n\n" +
+  `${LINKS.online}\n\n` +
+  "Si ya tienes instalada la aplicación también podrás hacerlo desde el apartado Suscripciones.\n\n" +
+  "Si todavía no sabes qué plan elegir, dime cuál es tu objetivo y te recomendaré el más adecuado.";
+
+// ── Asesor IA por objetivo (ambos negocios, determinista) ──
+export const OBJECTIVE_QUESTION =
+  "Para recomendarte lo mejor, ¿cuál es tu principal objetivo?\n" +
+  "1️⃣ Perder grasa\n2️⃣ Ganar masa muscular\n3️⃣ Mejorar tu salud\n" +
+  "4️⃣ Ponerte en forma\n5️⃣ Preparar una competición";
+
+const OBJECTIVE_LABEL: Record<number, string> = {
+  1: "perder grasa", 2: "ganar masa muscular", 3: "mejorar tu salud",
+  4: "ponerte en forma", 5: "preparar una competición",
+};
+
+export function recommendPlan(context: BusinessContext, objective: number): string {
+  const obj = OBJECTIVE_LABEL[objective] ?? "tu objetivo";
+  if (context === "gym") {
+    const rec =
+      objective === 1 ? "el *Personal Trainer* (dieta + Tesla Slimming) para maximizar la pérdida de grasa"
+      : objective === 2 ? "el *Personal Trainer* con seguimiento de fuerza y dieta"
+      : objective === 3 ? "el *entrenamiento grupal* (59€), completo y motivador"
+      : objective === 4 ? "el *funcional* (39,99€) o el *grupal* (59€)"
+      : "el *Personal Trainer Premium*, con plan y seguimiento total";
+    return `Para ${obj} te recomiendo ${rec}.\n\n` +
+      "¿Quieres reservar una clase de prueba para verlo en persona?\n1️⃣ Sí, reservar\n2️⃣ Prefiero apuntarme ya";
+  }
+  const rec =
+    objective === 1 ? "un plan online con déficit guiado y nutrición ajustada"
+    : objective === 2 ? "un plan de hipertrofia con seguimiento del coach"
+    : objective === 3 ? "un plan de salud y hábitos con la App"
+    : objective === 4 ? "un plan de puesta en forma progresivo"
+    : "un plan de preparación específico con seguimiento total";
+  return `Para ${obj} te recomiendo ${rec}.\n\n` +
+    "¿Reservamos una valoración gratuita para diseñarlo contigo?\n1️⃣ Sí, reservar\n2️⃣ Quiero contratar ya";
+}
+
+// ── Cambio de contexto ──
+export const SWITCH_OFFER = (from: BusinessContext) =>
+  from === "gym"
+    ? "Además del gimnasio también disponemos de programas completamente online.\n\n" +
+      "¿Quieres que te explique cómo funcionan?\n1️⃣ Sí\n2️⃣ No, seguimos con el gimnasio"
+    : "Además de los programas online, también tenemos nuestro gimnasio presencial en Murcia.\n\n" +
+      "¿Quieres que te cuente?\n1️⃣ Sí\n2️⃣ No, seguimos con lo online";

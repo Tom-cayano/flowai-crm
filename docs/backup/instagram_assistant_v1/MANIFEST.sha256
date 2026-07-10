@@ -1,0 +1,9 @@
+# Backup inmutable instagram_assistant_v1 — 2026-07-10T14:49:32Z
+
+37bf79c9bc04603a1914c49dcf881a7c6796de2b77612a7ae3604b7682112f8d  lib/instagram/reply-logic.ts
+4cc78615c19f333b4f569032460d6c97cfb1a27ba0bade51482f9b2a6146b744  pages/api/webhook/instagram.ts
+06e9d0645c1aebb478a8b27615886e43b395d88578c825f54bfa17e350b41aeb  workers/processors/instagram-comment.processor.ts
+d55ebdf411d550709cfaf210e940b45a8195730770ae54d30ac618199cf3eeb6  workers/processors/instagram-message.processor.ts
+f3d6521059a3efbb73fb6fa8daf15bb771203dd9d3805087bcc5606a0195ed8a  workers/processors/instagram-outbound.processor.ts
+6abdddd7442660fef53cbd0cc9751e5d3907d6709c36cf49851ff0f48bb3426a  lib/instagram/token-store.ts
+a4e253ad40a95bd43f9cd5a7f18724545056a58c586d264cd778de08724092aa  lib/instagram/client.ts

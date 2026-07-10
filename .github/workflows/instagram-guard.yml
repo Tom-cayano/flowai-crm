@@ -1,0 +1,33 @@
+# Guardián del módulo de Instagram.
+# Bloquea cualquier merge/deploy a main si fallan typecheck, lint o los tests
+# del asistente de Instagram (unit + contract). Herméticos (sin red), corren en
+# CI sin credenciales. El E2E con BD y el smoke se ejecutan en local/post-deploy.
+#
+# Requisito de rama protegida: marcar "instagram-guard" como check obligatorio
+# en GitHub → Settings → Branches → main.
+
+name: instagram-guard
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main, develop]
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Lint (módulo de Instagram)
+        run: npx eslint lib/instagram tests/instagram scripts/instagram-smoke.ts
+      - name: Tests del asistente de Instagram (unit + contract)
+        run: npm run test:ig

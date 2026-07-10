@@ -14,8 +14,9 @@
 // Bearer de un cron de Vercel con CRON_SECRET). Ruta exenta del middleware.
 
 import { NextRequest, NextResponse } from "next/server";
-import { getIGMessageQueue } from "@/lib/queue/queues";
+import { getIGMessageQueue, getIGCommentQueue } from "@/lib/queue/queues";
 import { processIGMessage } from "@/workers/processors/instagram-message.processor";
+import { processIGComment } from "@/workers/processors/instagram-comment.processor";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,34 +34,50 @@ function authorized(req: NextRequest): boolean {
   return !secret; // si no hay secreto configurado, no bloquear (dev)
 }
 
-async function drain() {
-  const q = getIGMessageQueue();
-  const jobs = await q.getJobs(["waiting", "delayed"], 0, BATCH - 1);
+// Normaliza el timestamp del job a milisegundos (los DMs vienen en ms, los
+// comentarios en segundos). Devuelve 0 si no hay timestamp fiable.
+function toMs(ts: unknown): number {
+  const n = Number(ts ?? 0);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return n < 1e12 ? n * 1000 : n; // < 1e12 → segundos
+}
 
+async function drainQueue<T extends { timestamp?: unknown }>(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  queue: any,
+  process: (data: T) => Promise<void>,
+  label: string,
+) {
+  const jobs = await queue.getJobs(["waiting", "delayed"], 0, BATCH - 1);
   let processed = 0, skippedStale = 0, failed = 0;
   const now = Date.now();
 
   for (const job of jobs) {
-    const ts = Number(job.data?.timestamp ?? 0);
+    const ts = toMs(job.data?.timestamp);
     if (ts && now - ts > MAX_AGE_MS) {
       await job.remove().catch(() => {});
       skippedStale++;
       continue;
     }
     try {
-      await processIGMessage(job.data);
+      await process(job.data as T);
       await job.remove().catch(() => {});
       processed++;
     } catch (err) {
-      // No dejar un job envenenado bloqueando la cola: se retira y se registra.
-      await job.remove().catch(() => {});
+      await job.remove().catch(() => {}); // no dejar jobs envenenados bloqueando
       failed++;
-      console.error("[ig-drain] processIGMessage falló:", err instanceof Error ? err.message : String(err));
+      console.error(`[ig-drain] ${label} falló:`, err instanceof Error ? err.message : String(err));
     }
   }
-
-  console.log("[ig-drain]", JSON.stringify({ pulled: jobs.length, processed, skippedStale, failed }));
   return { pulled: jobs.length, processed, skippedStale, failed };
+}
+
+async function drain() {
+  const messages = await drainQueue(getIGMessageQueue(), processIGMessage, "processIGMessage");
+  const comments = await drainQueue(getIGCommentQueue(), processIGComment, "processIGComment");
+  const result = { messages, comments };
+  console.log("[ig-drain]", JSON.stringify(result));
+  return result;
 }
 
 export async function POST(req: NextRequest) {

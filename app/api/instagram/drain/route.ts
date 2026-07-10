@@ -17,6 +17,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getIGMessageQueue, getIGCommentQueue } from "@/lib/queue/queues";
 import { processIGMessage } from "@/workers/processors/instagram-message.processor";
 import { processIGComment } from "@/workers/processors/instagram-comment.processor";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -47,12 +48,18 @@ async function drainQueue<T extends { timestamp?: unknown }>(
   queue: any,
   process: (data: T) => Promise<void>,
   label: string,
+  shouldSkip?: (data: T) => boolean,
 ) {
   const jobs = await queue.getJobs(["waiting", "delayed"], 0, BATCH - 1);
-  let processed = 0, skippedStale = 0, failed = 0;
+  let processed = 0, skippedStale = 0, skippedGuard = 0, failed = 0;
   const now = Date.now();
 
   for (const job of jobs) {
+    if (shouldSkip?.(job.data as T)) {
+      await job.remove().catch(() => {});
+      skippedGuard++;
+      continue;
+    }
     const ts = toMs(job.data?.timestamp);
     if (ts && now - ts > MAX_AGE_MS) {
       await job.remove().catch(() => {});
@@ -69,12 +76,27 @@ async function drainQueue<T extends { timestamp?: unknown }>(
       console.error(`[ig-drain] ${label} falló:`, err instanceof Error ? err.message : String(err));
     }
   }
-  return { pulled: jobs.length, processed, skippedStale, failed };
+  return { pulled: jobs.length, processed, skippedStale, skippedGuard, failed };
+}
+
+// IDs de nuestras propias cuentas de IG → nunca responder a nuestros propios
+// comentarios (evita bucles de auto-respuesta). Se cachea por invocación.
+async function ownAccountIgIds(): Promise<Set<string>> {
+  const db = createAdminClient();
+  const { data } = await db.from("instagram_accounts").select("ig_user_id").eq("is_active", true);
+  return new Set((data ?? []).map((a) => a.ig_user_id));
 }
 
 async function drain() {
+  const ownIds = await ownAccountIgIds();
   const messages = await drainQueue(getIGMessageQueue(), processIGMessage, "processIGMessage");
-  const comments = await drainQueue(getIGCommentQueue(), processIGComment, "processIGComment");
+  const comments = await drainQueue(
+    getIGCommentQueue(),
+    processIGComment,
+    "processIGComment",
+    // Guarda: no responder a comentarios de nuestra propia cuenta (self-comment).
+    (data: { fromIgUserId?: string }) => Boolean(data.fromIgUserId && ownIds.has(data.fromIgUserId)),
+  );
   const result = { messages, comments };
   console.log("[ig-drain]", JSON.stringify(result));
   return result;

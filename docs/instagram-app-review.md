@@ -34,6 +34,41 @@ code and by live tokens:
 | `pages_manage_metadata` / `pages_read_engagement` / `pages_messaging` | (implicit in Instagram Login) |
 | Human Agent (message tag) | Human Agent |
 
+### Permission list DERIVED FROM SOURCE CODE (evidence, not assumption)
+
+Live products (from `/{app-id}/subscriptions`): webhook objects `page` +
+`whatsapp_business_account` only — **no `instagram` object** ⇒ the Instagram-Login
+product is **not** configured. App type = Business; OAuth = `facebook.com/dialog/oauth`;
+tokens = Page tokens. → architecture is **Facebook Login + Pages + Instagram
+messaging via Page** (WhatsApp is a separate product).
+
+| Feature actually in the code | Endpoint called | Required permission | Evidence (caller) |
+|---|---|---|---|
+| Receive DMs | `page` webhook, field `messages` | `instagram_manage_messages` | `subscribed_fields=[messages]` |
+| Resolve sender profile | `GET /{igsid}` | `instagram_manage_messages` | `instagram-message.processor` (getIGSenderInfo) |
+| Send DM reply | `POST /me/messages` | `instagram_manage_messages` (+ `pages_messaging` transport) | `instagram-outbound.processor` (sendDM) |
+| Receive comments | `page` webhook, fields `feed`/`mention` | `instagram_manage_comments` | `subscribed_fields=[mention,feed]` |
+| Reply to a comment | `POST /{comment-id}/replies` | `instagram_manage_comments` | `action-executor` (replyToComment) |
+| Read IG profile / account | `GET /me`, `GET /me/accounts` | `instagram_basic`, `pages_show_list` | `oauth/callback` (getIGUser, getPages) |
+| Subscribe Page to webhooks | `POST /{page-id}/subscribed_apps` | `pages_manage_metadata` | `oauth/callback` (subscribePageToWebhooks) |
+| Page/IG access prerequisite | — | `pages_read_engagement` | dependency of Pages + IG messaging |
+
+**Verdict — request EXACTLY these in App Review (Advanced Access on the two IG ones):**
+`instagram_basic`, `instagram_manage_messages`, `instagram_manage_comments`,
+`pages_show_list`, `pages_manage_metadata`, `pages_read_engagement`, `pages_messaging`.
+
+- **Corrected:** `instagram_manage_comments` was missing from the OAuth request but
+  is required by `replyToComment` (used in `action-executor`). Re-added — reconnect
+  the account so the token includes it.
+- **Do NOT request** `instagram_business_*` — that is the Instagram-Login product,
+  which this app does not use (no `instagram` webhook object configured).
+- **No over-request detected:** every scope in the OAuth maps to a used code path or
+  a required dependency. Dead code (`sendImageDM`, `setCommentVisibility`, `getMedia`)
+  adds no extra permission beyond `instagram_basic`.
+- Facebook Messenger (FBM) exists in code but has **no active automations** in
+  production; `pages_messaging` is justified here only as the transport for the
+  Instagram Page send, not as a standalone Messenger feature.
+
 ---
 
 ## 1. Readiness checklist (FASE 3)

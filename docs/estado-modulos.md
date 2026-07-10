@@ -12,7 +12,7 @@ real · 🔒 bloqueado por acción externa del propietario.
 | 2 | Webhooks universales + panel Integraciones | ✅ | — |
 | 3 | Dashboard con métricas reales | ✅ | — |
 | 4 | /ops (salud, colas, DLQ) | ✅ | — |
-| 5 | Asistente comercial (funnels online/directo, reservas, anti doble-reserva, recuperación de leads) | 🟡🔒 | **Redeploy del worker en Railway** y una prueba real desde un móvil por el pipeline entrante completo |
+| 5 | Asistente comercial (funnels online/directo, reservas, anti doble-reserva, recuperación de leads) | ✅ | **Operativo vía puente Vercel** (`/api/sales/run`, commit `8b68e93`). E2E probado con nº real 556291259429 → menú entregado (external_id `3EB0DF53…`). El worker de Railway está congelado en una imagen 4-8 jul; el puente ejecuta el asistente con código actual. Al reconstruir el worker, volver a la acción nativa `sales_assistant`. |
 | 6 | Recordatorios de cita 24h/1h + no-show + re-engagement | 🟡🔒 | Redeploy del worker (el cron vive en el worker) |
 | 7 | Email nativo (Resend) | 🟡🔒 | API key real de Resend + dominio verificado en Ajustes → Email; después: envío real, webhook de estados y métricas con datos |
 | 8 | Google Calendar / Meet | 🟡🔒 | Credenciales de service account (`GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_SERVICE_ACCOUNT_KEY`, `GOOGLE_CALENDAR_ID`) y compartir el calendario de Carola; mientras, rige la agenda interna del CRM |

@@ -105,10 +105,36 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       console.error("[ig-webhook] Queue error:", err);
     }
 
+    // Dispara el drenador de DMs en Vercel (el consumidor igm-message del worker
+    // de Railway está caído). Best-effort con timeout corto para no retrasar el
+    // 200 a Meta; si falla, el siguiente evento o el cron drenan la cola.
+    await triggerDrain();
+
     return res.status(200).json({ received: true });
   }
 
   return res.status(405).json({ error: "Method Not Allowed" });
+}
+
+// ── Drain trigger ─────────────────────────────────────────────────────────────
+// Llama al drenador de DMs (Vercel) que reemplaza al consumidor igm-message del
+// worker congelado. Best-effort: timeout corto y errores ignorados — Meta debe
+// recibir su 200 rápido y la cola se drena igualmente en la siguiente llamada.
+async function triggerDrain(): Promise<void> {
+  const secret = (process.env.EVOLUTION_WEBHOOK_SECRET ?? "").trim();
+  const base =
+    process.env.NEXT_PUBLIC_APP_URL ||
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "https://www.flowaicrm.com");
+  try {
+    const ctrl = AbortSignal.timeout(3500);
+    await fetch(`${base}/api/instagram/drain`, {
+      method:  "POST",
+      headers: { "content-type": "application/json", "x-sales-secret": secret },
+      signal:  ctrl,
+    });
+  } catch {
+    // ignorado a propósito
+  }
 }
 
 // ── Signature Verification Logic ──────────────────────────────────────────────

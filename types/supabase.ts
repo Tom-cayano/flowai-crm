@@ -161,6 +161,7 @@ export interface Database {
         };
         Update: {
           contact_name?: string;
+          contact_id?: string | null;
           contact_phone?: string | null;
           assigned_to?: string | null;
           status?: "open" | "resolved" | "pending" | "spam";
@@ -1809,29 +1810,38 @@ export interface Database {
       };
       instagram_contacts: {
         Row: {
-          id:           string;
-          account_id:   string;
-          user_id:      string;
-          ig_user_id:   string;
-          ig_username:  string | null;
-          avatar_url:   string | null;
-          last_seen_at: string | null;
-          created_at:   string;
+          id:            string;
+          account_id:    string;
+          user_id:       string;
+          ig_user_id:    string;
+          ig_username:   string | null;
+          display_name:  string | null;
+          avatar_url:    string | null;
+          contact_id:    string | null;
+          first_seen_at: string | null;
+          last_seen_at:  string | null;
+          created_at:    string;
         };
         Insert: {
-          id?:          string;
-          account_id:   string;
-          user_id:      string;
-          ig_user_id:   string;
-          ig_username?:  string | null;
-          avatar_url?:  string | null;
-          last_seen_at?: string | null;
-          created_at?:  string;
+          id?:            string;
+          account_id:     string;
+          user_id:        string;
+          ig_user_id:     string;
+          ig_username?:   string | null;
+          display_name?:  string | null;
+          avatar_url?:    string | null;
+          contact_id?:    string | null;
+          first_seen_at?: string | null;
+          last_seen_at?:  string | null;
+          created_at?:    string;
         };
         Update: {
-          ig_username?:  string | null;
-          avatar_url?:  string | null;
-          last_seen_at?: string | null;
+          ig_username?:   string | null;
+          display_name?:  string | null;
+          avatar_url?:    string | null;
+          contact_id?:    string | null;
+          first_seen_at?: string | null;
+          last_seen_at?:  string | null;
         };
         Relationships: [];
       };

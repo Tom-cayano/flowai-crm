@@ -354,7 +354,7 @@ async function upsertIGContact(
   // so that we can correct a previously-stored wrong value.
   // Only skip if senderName is null (Graph API failed).
   if (data && senderName) {
-    const updateFields: Record<string, string> = {
+    const updateFields: { ig_username: string; display_name: string; avatar_url?: string } = {
       ig_username:  senderName,
       display_name: senderName,
     };
@@ -506,7 +506,7 @@ async function upsertCrmConversation(
     const currentIsFallback = existing.contact_name?.startsWith("ig:");
     const newIsReal         = !displayName.startsWith("ig:");
 
-    const updateFields: Record<string, unknown> = {};
+    const updateFields: { contact_name?: string; contact_id?: string } = {};
     if (currentIsFallback && newIsReal) {
       updateFields.contact_name = displayName;
       console.log("[ig-msg] Backfilling contact_name:", existing.contact_name, "→", displayName);

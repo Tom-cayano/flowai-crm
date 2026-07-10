@@ -106,6 +106,11 @@ export async function GET(): Promise<NextResponse> {
         scope:         IG_SCOPES,
         response_type: "code",
         state:         user.id,   // echoed back in callback for CSRF validation
+        // Fuerza a Facebook a RE-mostrar el consentimiento aunque la app ya
+        // estuviera autorizada. Sin esto, al reconectar una cuenta ya conectada
+        // Facebook NO vuelve a pedir permisos recién añadidos (p. ej.
+        // instagram_manage_comments) y devuelve un token sin ese scope.
+        auth_type:     "rerequest",
       }).toString();
 
     console.info(

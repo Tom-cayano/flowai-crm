@@ -10,7 +10,11 @@
     "worker": "tsx --tsconfig workers/tsconfig.json workers/worker.ts",
     "worker:dev": "tsx watch --tsconfig workers/tsconfig.json workers/worker.ts",
     "typecheck": "tsc --noEmit",
-    "typecheck:worker": "tsc --project workers/tsconfig.json --noEmit"
+    "typecheck:worker": "tsc --project workers/tsconfig.json --noEmit",
+    "test": "tsx --test tests/sales/router.test.ts tests/sales/contract.test.ts",
+    "test:e2e": "tsx --test tests/sales/e2e.test.ts",
+    "test:all": "npm run test && npm run test:e2e",
+    "smoke:sales": "tsx scripts/sales-smoke.ts"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.1.11",

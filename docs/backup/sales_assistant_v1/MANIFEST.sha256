@@ -1,0 +1,10 @@
+# Backup inmutable sales_assistant_v1 — 2026-07-10T09:05:45Z
+# commit: 17ab172498bbcfb741ff9d46ce4d17ec6d37e7f5
+
+045349224011190aa7da81d6db5b024950b1c523988d922f9196a2bcf00bbc95  lib/sales/knowledge.ts
+18d53bd87be825f8331de30e98628a1c7e1d2472be91814b58336b3dc4e186d9  lib/sales/assistant.ts
+4a9d7ef88920e1b0fedfa6fb9c3e534f67ce42519f8588b8b171f53237e54d91  lib/sales/config.ts
+a52a43df76fed50f59b30fd08eb83574dad8af1f456a6fc6d319e2aa8b9b348e  lib/sales/slots.ts
+31152d44e9631db1dc8a08f54641c43c116c1a0f5795116100193a9efe727245  lib/sales/google-calendar.ts
+678b3401df1dcb43f9f221b98c4bdd99d0dbd50cdb5a3761b771e256c5f400b2  lib/sales/reminders.ts
+5b44e65f78fc98ff40b6c12fe801afe5e7438554f7e2fd522ff26dbf36f5d298  app/api/sales/run/route.ts

@@ -1,12 +1,6 @@
 // Conocimiento comercial de Love Fitness Murcia / Transforma Fit Coach.
 // Única fuente de verdad para precios, horarios, copys y clasificación de
 // intención del asistente comercial. Sin dependencias — puro y testeable.
-//
-// ⚠️  MÓDULO ESTABLE DE PRODUCCIÓN — versión sales_assistant_v1 (2026-07-10).
-//     No modificar directamente en producción. Ver docs/sales-assistant.md.
-
-/** Versión estable congelada del recepcionista comercial. */
-export const SALES_ASSISTANT_VERSION = "sales_assistant_v1";
 
 // ─── Clasificación de flujo ───────────────────────────────────────────────────
 

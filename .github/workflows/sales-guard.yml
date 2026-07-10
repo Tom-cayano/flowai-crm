@@ -1,0 +1,34 @@
+# FASE 10 — Guardián del módulo de ventas.
+# Bloquea cualquier merge/deploy a main si fallan typecheck, lint o los tests
+# del recepcionista (unit + contract). Estos tests son herméticos (sin red),
+# así que corren en CI sin credenciales. Los E2E con BD se ejecutan en local
+# (npm run test:e2e) y como smoke post-deploy.
+#
+# Requisito de rama protegida: marcar "sales-guard" como check obligatorio en
+# GitHub → Settings → Branches → main.
+
+name: sales-guard
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main, develop]
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Lint (módulo de ventas)
+        run: npx eslint lib/sales app/api/sales tests/sales proxy.ts
+      - name: Tests del recepcionista (unit + contract)
+        run: npm test

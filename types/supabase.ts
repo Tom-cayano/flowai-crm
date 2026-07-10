@@ -1114,6 +1114,24 @@ export interface Database {
         };
         Relationships: [];
       };
+      sales_config: {
+        Row: {
+          user_id: string; link_gym: string; link_online: string; trial_price: string;
+          welcome: string | null; pricing_text: string | null; schedule_text: string | null;
+          faqs: Json; promos: Json; extra: Json; updated_at: string; created_at: string;
+        };
+        Insert: {
+          user_id: string; link_gym?: string; link_online?: string; trial_price?: string;
+          welcome?: string | null; pricing_text?: string | null; schedule_text?: string | null;
+          faqs?: Json; promos?: Json; extra?: Json; updated_at?: string; created_at?: string;
+        };
+        Update: {
+          link_gym?: string; link_online?: string; trial_price?: string;
+          welcome?: string | null; pricing_text?: string | null; schedule_text?: string | null;
+          faqs?: Json; promos?: Json; extra?: Json; updated_at?: string;
+        };
+        Relationships: [];
+      };
       webhook_integrations: {
         Row: {
           id: string;
@@ -2053,6 +2071,10 @@ export interface Database {
     Views: Record<string, never>;
     Functions: {
       dashboard_stats: {
+        Args: { p_user_id: string };
+        Returns: Json;
+      };
+      sales_diagnostics: {
         Args: { p_user_id: string };
         Returns: Json;
       };

@@ -14,9 +14,10 @@
 // Bearer de un cron de Vercel con CRON_SECRET). Ruta exenta del middleware.
 
 import { NextRequest, NextResponse } from "next/server";
-import { getIGMessageQueue, getIGCommentQueue } from "@/lib/queue/queues";
+import { getIGMessageQueue, getIGCommentQueue, getIGOutboundQueue } from "@/lib/queue/queues";
 import { processIGMessage } from "@/workers/processors/instagram-message.processor";
 import { processIGComment } from "@/workers/processors/instagram-comment.processor";
+import { processIGOutbound } from "@/workers/processors/instagram-outbound.processor";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
@@ -43,7 +44,7 @@ function toMs(ts: unknown): number {
   return n < 1e12 ? n * 1000 : n; // < 1e12 → segundos
 }
 
-async function drainQueue<T extends { timestamp?: unknown }>(
+async function drainQueue<T>(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   queue: any,
   process: (data: T) => Promise<void>,
@@ -52,6 +53,7 @@ async function drainQueue<T extends { timestamp?: unknown }>(
 ) {
   const jobs = await queue.getJobs(["waiting", "delayed"], 0, BATCH - 1);
   let processed = 0, skippedStale = 0, skippedGuard = 0, failed = 0;
+  const errors: string[] = [];
   const now = Date.now();
 
   for (const job of jobs) {
@@ -60,7 +62,7 @@ async function drainQueue<T extends { timestamp?: unknown }>(
       skippedGuard++;
       continue;
     }
-    const ts = toMs(job.data?.timestamp);
+    const ts = toMs((job.data as { timestamp?: unknown })?.timestamp);
     if (ts && now - ts > MAX_AGE_MS) {
       await job.remove().catch(() => {});
       skippedStale++;
@@ -71,12 +73,16 @@ async function drainQueue<T extends { timestamp?: unknown }>(
       await job.remove().catch(() => {});
       processed++;
     } catch (err) {
-      await job.remove().catch(() => {}); // no dejar jobs envenenados bloqueando
+      // No marcar como enviado/completado sin confirmación: se registra el error
+      // REAL de Meta y el job se retira para no bloquear la cola.
+      await job.remove().catch(() => {});
       failed++;
-      console.error(`[ig-drain] ${label} falló:`, err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      if (errors.length < 5) errors.push(msg);
+      console.error(`[ig-drain] ${label} FAILED:`, msg);
     }
   }
-  return { pulled: jobs.length, processed, skippedStale, skippedGuard, failed };
+  return { pulled: jobs.length, processed, skippedStale, skippedGuard, failed, errors };
 }
 
 // IDs de nuestras propias cuentas de IG → nunca responder a nuestros propios
@@ -87,17 +93,32 @@ async function ownAccountIgIds(): Promise<Set<string>> {
   return new Set((data ?? []).map((a) => a.ig_user_id));
 }
 
-async function drain() {
+async function drain(opts: { outboundOnly?: boolean } = {}) {
   const ownIds = await ownAccountIgIds();
-  const messages = await drainQueue(getIGMessageQueue(), processIGMessage, "processIGMessage");
-  const comments = await drainQueue(
-    getIGCommentQueue(),
-    processIGComment,
-    "processIGComment",
-    // Guarda: no responder a comentarios de nuestra propia cuenta (self-comment).
-    (data: { fromIgUserId?: string }) => Boolean(data.fromIgUserId && ownIds.has(data.fromIgUserId)),
-  );
-  const result = { messages, comments };
+
+  let messages, comments;
+  if (!opts.outboundOnly) {
+    messages = await drainQueue(getIGMessageQueue(), processIGMessage, "processIGMessage");
+    comments = await drainQueue(
+      getIGCommentQueue(),
+      processIGComment,
+      "processIGComment",
+      // Guarda: no responder a comentarios de nuestra propia cuenta (self-comment).
+      (data: { fromIgUserId?: string }) => Boolean(data.fromIgUserId && ownIds.has(data.fromIgUserId)),
+    );
+    // Dar tiempo a que el worker (cola wpp-automation, viva) ejecute la
+    // automatización y encole el envío en igm-outbound antes de drenarlo.
+    if ((messages.processed ?? 0) > 0 || (comments.processed ?? 0) > 0) {
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+  }
+
+  // Consumidor igm-outbound del worker TAMBIÉN caído → aquí se ejecuta el envío
+  // real vía Graph API. processIGOutbound lanza excepción si Meta rechaza, así
+  // que el estado que se registra es el REAL (nunca "completado" sin confirmar).
+  const outbound = await drainQueue(getIGOutboundQueue(), processIGOutbound, "processIGOutbound");
+
+  const result = { messages, comments, outbound };
   console.log("[ig-drain]", JSON.stringify(result));
   return result;
 }

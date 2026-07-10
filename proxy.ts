@@ -32,6 +32,7 @@ const BYPASS_PREFIXES = [
   "/api/webhook/",       // Evolution API, Meta, etc. — no tienen sesión
   "/api/webhooks/",      // Webhook universal de integraciones — usa Bearer token
   "/api/billing/webhooks", // Stripe webhook — usa firma, no sesión
+  "/api/sales/",         // puente del asistente comercial — usa secreto compartido
   "/api/ops",            // health checks internos
   "/_next/",
   "/favicon",

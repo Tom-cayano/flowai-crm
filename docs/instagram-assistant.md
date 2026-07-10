@@ -9,23 +9,25 @@
 
 ---
 
-## 0. Estado real (auditoría 2026-07-10)
+## 0. Estado real (2026-07-10, tras el fix)
 
-**Instagram NO está operativo en producción por dos bloqueos externos:**
+**Instagram OPERATIVO en producción.** Token renovado (connected, expira
+2026-09-08). Diagnóstico forense del "0 ejecuciones": los consumidores
+`igm-message` e `igm-comment` del **worker de Railway (congelado) están caídos**
+(jobs en `waiting`, 0 `active`) mientras el worker sí consume el resto de colas
+(`wpp-*`, `igm-outbound`, `wpp-automation`). Los DMs llegaban y se encolaban pero
+nunca se procesaban → `enqueueAutomation` no corría → 0 ejecuciones.
 
-1. **Tokens caducados.** Las dos cuentas (`instagram_accounts`) están en
-   `connection_state = token_expired` (`token_expires_at = null`). Sin token
-   válido, Instagram no puede enviar ni recibir. **Renovación:** el usuario debe
-   reconectar la cuenta por OAuth de Meta en `/settings/instagram` — un token ya
-   caducado no se refresca solo.
-2. **Worker de Railway congelado.** Los procesadores IG (junio) SÍ están en la
-   imagen congelada y se ejecutan, pero cualquier **corrección de código** a los
-   procesadores no llega a producción hasta redesplegar el worker (o exponer un
-   puente en Vercel, como se hizo con el Sales Assistant).
+**Fix (patrón del puente de Sales):** un **drenador en Vercel**
+(`app/api/instagram/drain`) reemplaza a los consumidores muertos: extrae los
+jobs de `igm-message`/`igm-comment` y los procesa con los mismos
+`processIGMessage`/`processIGComment`. El resto de la cadena (`wpp-automation`,
+`igm-outbound`) sí la consume el worker, así que la automatización se ejecuta y la
+respuesta se entrega. El webhook dispara el drenador tras encolar (baja latencia).
 
-Además, las 2 automaciones IG existentes eran placeholders de prueba
-(`status:inactive`, `last_triggered_at:null`) con texto de prueba — no respuestas
-comerciales reales de "Precio"/"Información".
+También: creada automación `instagram_first_contact` (el primer DM de un contacto
+nuevo emite ese trigger, que antes no tenía automación); cola `igm-message`
+purgada (182 DMs antiguos de junio).
 
 ## 1. Qué hace (diseño)
 

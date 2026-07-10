@@ -2,8 +2,26 @@
 // instances and repairs discrepancies in the Supabase DB.
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getEvolutionClient } from "@/lib/evolution-client";
+import { EvolutionClient, getEvolutionClient } from "@/lib/evolution-client";
 import { enqueueSession } from "@/lib/queue/producers";
+
+/**
+ * Builds an Evolution client for a specific instance using its own
+ * server_url + api_key from the DB (the same per-instance credentials the
+ * message and outbound pipelines use). Falls back to the env-based global
+ * client only when the row lacks them.
+ *
+ * Root cause this fixes: the monitor used the global env client, whose
+ * EVOLUTION_SERVER_URL on the worker pointed to a stale Evolution server
+ * (…-9497) where the "flowai" instance does not exist → 404. Each instance's
+ * real server lives in whatsapp_instances.server_url (…-3461).
+ */
+function clientForInstance(serverUrl: string | null, apiKey: string | null): EvolutionClient {
+  if (serverUrl && apiKey) {
+    return new EvolutionClient({ serverUrl, apiKey });
+  }
+  return getEvolutionClient();
+}
 
 export interface SessionHealthReport {
   instanceName: string;
@@ -19,7 +37,7 @@ export async function runSessionHealthCheck(): Promise<SessionHealthReport[]> {
 
   const { data: instances, error } = await supabase
     .from("whatsapp_instances")
-    .select("id, instance_name, user_id, connection_state, is_active")
+    .select("id, instance_name, user_id, connection_state, is_active, server_url, api_key")
     .eq("is_active", true);
 
   if (error || !instances?.length) {
@@ -27,17 +45,18 @@ export async function runSessionHealthCheck(): Promise<SessionHealthReport[]> {
     return reports;
   }
 
-  // Get singleton client — reads EVOLUTION_SERVER_URL + EVOLUTION_API_KEY from ENV
-  let client;
-  try {
-    client = getEvolutionClient();
-  } catch (err) {
-    console.error("[session-monitor] Evolution client unavailable:", err);
-    return reports;
-  }
-
   await Promise.allSettled(
     instances.map(async (instance) => {
+      // Per-instance client (each instance may live on a different Evolution
+      // server). Falls back to the env client only when the row lacks creds.
+      let client: EvolutionClient;
+      try {
+        client = clientForInstance(instance.server_url, instance.api_key);
+      } catch (err) {
+        console.error(`[session-monitor] Evolution client unavailable for "${instance.instance_name}":`, err);
+        return;
+      }
+
       const result = await client.getConnectionState(instance.instance_name);
 
       if (!result.ok) {
@@ -96,9 +115,16 @@ export async function runSessionHealthCheck(): Promise<SessionHealthReport[]> {
 export async function reconnectInstance(
   instanceName: string
 ): Promise<boolean> {
-  let client;
+  const supabase = createAdminClient();
+  const { data: row } = await supabase
+    .from("whatsapp_instances")
+    .select("server_url, api_key")
+    .eq("instance_name", instanceName)
+    .maybeSingle();
+
+  let client: EvolutionClient;
   try {
-    client = getEvolutionClient();
+    client = clientForInstance(row?.server_url ?? null, row?.api_key ?? null);
   } catch (err) {
     console.error(`[session-monitor] Evolution client unavailable for reconnect "${instanceName}":`, err);
     return false;

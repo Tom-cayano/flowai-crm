@@ -37,6 +37,7 @@ async function main() {
       // Node.js 20 no trae WebSocket nativo; supabase-js lo exige al construir
       // el cliente realtime. Node 22+ ya lo trae y no necesita el transport.
       realtime: typeof globalThis.WebSocket === "undefined"
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
         ? { transport: require("ws") }
         : {},
     },

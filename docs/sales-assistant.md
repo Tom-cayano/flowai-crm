@@ -110,6 +110,32 @@ Resumen: `git checkout sales_assistant_v1 -- lib/sales app/api/sales tests/sales
   (Vercel, código actual). Al reconstruir el worker desde `main`, cambiar la
   acción `send_webhook` de las automatizaciones por la nativa `sales_assistant`.
 
+## 7 bis. Disparador (trigger) — cuándo se activa y cuándo NO
+
+El asistente se activa **exclusivamente** ante:
+1. Un **mensaje entrante nuevo** de WhatsApp (`fromMe=false`) de un lead.
+2. Un **lead nuevo de Transforma Fit Coach** (webhook).
+3. Un **lead nuevo de Meta** (Facebook/Instagram).
+
+Nunca se activa al abrir/leer un chat, escribir manualmente desde el CRM,
+reabrir una conversación antigua, sincronizar historial, actualizar un contacto,
+por procesos internos, ni para clientes/proveedores/otras empresas (Renovamax).
+
+Capas de protección (todas en código vivo — el worker de Railway está congelado):
+
+| Capa | Dónde | Qué bloquea |
+|---|---|---|
+| `!fromMe` en el origen | `workers/processors/message.processor.ts` (`enqueueAutomation` sólo si `!fromMe`) | Envíos manuales del CRM y ecos `send.message` |
+| Frescura del entrante | `app/api/sales/run` (`SALES_TRIGGER_MAX_AGE_MS`, 15 min) | Reaperturas antiguas, sync de historial, triggers repetidos → `blocked:stale-inbound` |
+| Sin entrante | `app/api/sales/run` | Abrir/leer un chat sin mensaje → `blocked:no-inbound-message` |
+| `assistant_initialized` | `lib/sales/assistant.ts` (`custom_fields.assistant_initialized`) | Re-saludo: la bienvenida se envía **una sola vez** por contacto → `welcome:bloqueado-ya-inicializado` |
+| Etiquetas excluidas | `lib/sales/assistant.ts` (`EXCLUDED_TAGS`: cliente, proveedor, interno, no-asistente, renovamax) | Contactos que no son leads → `excluido:<tag>` |
+
+El puente registra cada decisión: `[sales-trigger] FIRE {…}` o
+`[sales-trigger] BLOCK {reason,…}`. Verificación reproducible contra
+producción: `npm run verify:trigger` (crea contactos ficticios, demuestra los 6
+escenarios FIRE/BLOCK y limpia).
+
 ## 8. Tests (protección)
 
 - `npm test` — unit (router/detección/enlaces) + contract (payloads/colas). Herméticos, corren en CI.

@@ -53,10 +53,10 @@ after(async () => {
   await db.from("contacts").delete().eq("id", CID);
 });
 
-async function say(text: string): Promise<{ out: string; state: unknown; ctx: unknown }> {
+async function say(text: string): Promise<{ out: string; state: unknown; ctx: unknown; handled: boolean; detail: string; initialized: unknown }> {
   captured.length = 0;
   const { runSalesAssistant } = await import("../../lib/sales/assistant");
-  await runSalesAssistant({
+  const res = await runSalesAssistant({
     userId: USER, conversationId: CVID, contactId: CID, phone: PHONE, incomingText: text,
     isFirstMessage: false, instanceName: "flowai", serverUrl: process.env.EVOLUTION_SERVER_URL ?? "x",
     instanceApiKey: process.env.EVOLUTION_API_KEY ?? "k", variables: {}, triggerType: "message_received",
@@ -64,7 +64,7 @@ async function say(text: string): Promise<{ out: string; state: unknown; ctx: un
   }, async () => {}, { send });
   const { data } = await db.from("contacts").select("custom_fields").eq("id", CID).maybeSingle();
   const cf = (data?.custom_fields ?? {}) as Record<string, unknown>;
-  return { out: captured.join(" ⏎ "), state: cf.funnel_state, ctx: cf.funnel_context };
+  return { out: captured.join(" ⏎ "), state: cf.funnel_state, ctx: cf.funnel_context, handled: res.handled, detail: res.detail, initialized: cf.assistant_initialized };
 }
 const reset = () => db.from("contacts").update({ custom_fields: {}, tags: [] }).eq("id", CID);
 
@@ -109,4 +109,36 @@ test("E2E CASO 5 · cambio de contexto → pregunta antes de cambiar", opts, asy
   assert.match(r.out, /también disponemos de programas completamente online/i);
   r = await say("1");
   assert.equal(r.ctx, "online");
+});
+
+test("E2E CASO 6 · saludo UNA sola vez (assistant_initialized bloquea re-saludo)", opts, async () => {
+  await reset();
+  // 1er contacto ambiguo → saluda y marca assistant_initialized=true
+  let r = await say("Hola");
+  assert.equal(r.detail, "reception:saludo");
+  assert.equal(r.initialized, true);
+  assert.ok(r.out.length > 0, "debe enviar el saludo la primera vez");
+
+  // Simula reapertura de conversación antigua / trigger repetido: se pierde el
+  // funnel_state pero assistant_initialized sigue true → NO se re-saluda.
+  await db.from("contacts").update({ custom_fields: { assistant_initialized: true } }).eq("id", CID);
+  r = await say("Hola");
+  assert.equal(r.handled, false);
+  assert.equal(r.detail, "welcome:bloqueado-ya-inicializado");
+  assert.equal(r.out, "", "NO debe reenviar ningún saludo");
+
+  // Pero un texto con intención real de negocio sí avanza (no es un re-saludo).
+  r = await say("quiero apuntarme al gimnasio");
+  assert.equal(r.ctx, "gym");
+});
+
+test("E2E CASO 7 · contacto excluido (cliente/proveedor/Renovamax) nunca recibe saludo", opts, async () => {
+  await reset();
+  for (const tag of ["cliente", "proveedor", "renovamax"]) {
+    await db.from("contacts").update({ custom_fields: {}, tags: [tag] }).eq("id", CID);
+    const r = await say("Hola, quiero información");
+    assert.equal(r.handled, false, `tag ${tag} debe bloquear`);
+    assert.equal(r.detail, `excluido:${tag}`);
+    assert.equal(r.out, "", `tag ${tag} no debe enviar nada`);
+  }
 });

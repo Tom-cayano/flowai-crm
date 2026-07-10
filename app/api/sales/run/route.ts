@@ -60,19 +60,38 @@ export async function POST(req: NextRequest) {
     .limit(1)
     .maybeSingle();
 
-  // 3. Último mensaje ENTRANTE (el que hay que responder) — de la BD, ya
-  //    almacenado por el message.processor antes de disparar la automatización.
-  let incomingText = (body.text ?? "").trim();
-  if (!incomingText && conv) {
+  // 3. Último mensaje ENTRANTE del contacto (sender=contact) con su antigüedad.
+  //    El message.processor almacena el mensaje ANTES de disparar la
+  //    automatización, así que ante un trigger real el entrante ya está en BD
+  //    y es reciente. Lo usamos como referencia de frescura.
+  let incomingText  = (body.text ?? "").trim();
+  let lastInboundAt: string | null = null;
+  if (conv) {
     const { data: lastIn } = await db
       .from("messages")
-      .select("content")
+      .select("content, created_at")
       .eq("conversation_id", conv.id)
       .eq("sender", "contact")
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
-    incomingText = (lastIn?.content ?? "").trim();
+    if (!incomingText) incomingText = (lastIn?.content ?? "").trim();
+    lastInboundAt = lastIn?.created_at ?? null;
+  }
+
+  // 3b. GUARDA DEL TRIGGER — el asistente sólo debe activarse ante un mensaje
+  //     entrante REAL y RECIENTE. Bloquea (sin responder): apertura/lectura de
+  //     un chat (no hay entrante), reapertura de conversaciones antiguas,
+  //     sincronización de historial y triggers repetidos/espurios.
+  const MAX_AGE_MS = Number(process.env.SALES_TRIGGER_MAX_AGE_MS ?? 900_000); // 15 min
+  if (!incomingText && !lastInboundAt) {
+    console.warn("[sales-trigger] BLOCK", { reason: "no-inbound-message", phone, userId });
+    return NextResponse.json({ ok: false, blocked: "no-inbound-message" }, { status: 200 });
+  }
+  const ageMs = lastInboundAt ? Date.now() - new Date(lastInboundAt).getTime() : 0;
+  if (lastInboundAt && ageMs > MAX_AGE_MS) {
+    console.warn("[sales-trigger] BLOCK", { reason: "stale-inbound", phone, userId, ageMs, lastInboundAt });
+    return NextResponse.json({ ok: false, blocked: "stale-inbound", ageMs }, { status: 200 });
   }
 
   // 4. Credenciales de la instancia WhatsApp abierta del usuario (per-instancia)
@@ -102,6 +121,10 @@ export async function POST(req: NextRequest) {
   };
 
   // 5. Ejecutar el asistente (encola la respuesta en wpp-outbound → worker → Evolution)
+  console.log("[sales-trigger] FIRE", {
+    phone, userId, conversationId: conv?.id ?? null, ageMs,
+    textPreview: incomingText.slice(0, 60),
+  });
   const result = await runSalesAssistant(ctx, async (level, message) => {
     console.log(`[sales-bridge] ${level}: ${message}`);
   });

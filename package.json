@@ -14,7 +14,8 @@
     "test": "tsx --test tests/sales/router.test.ts tests/sales/contract.test.ts",
     "test:e2e": "tsx --test tests/sales/e2e.test.ts",
     "test:all": "npm run test && npm run test:e2e",
-    "smoke:sales": "tsx scripts/sales-smoke.ts"
+    "smoke:sales": "tsx scripts/sales-smoke.ts",
+    "verify:trigger": "tsx scripts/trigger-verify.ts"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.1.11",

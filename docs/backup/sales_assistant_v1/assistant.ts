@@ -63,7 +63,24 @@ interface Funnel {
   funnel_switch_to?: BusinessContext;        // destino del cambio de contexto
   funnel_appointment_id?: string;
   snooze_until?:    string;
+  /**
+   * Protección permanente del saludo: se pone a true en cuanto el asistente
+   * envía su PRIMER mensaje de bienvenida a este contacto. Mientras sea true,
+   * el saludo inicial NUNCA vuelve a enviarse (evita re-saludar al reabrir una
+   * conversación antigua, al sincronizar historial o ante triggers repetidos).
+   */
+  assistant_initialized?: boolean;
 }
+
+/**
+ * Contactos que el recepcionista comercial NUNCA debe saludar, aunque el
+ * trigger se dispare: clientes existentes, proveedores, conversaciones internas
+ * y cualquier contacto de otra empresa (p. ej. Renovamax). La detección es por
+ * etiqueta del contacto — el equipo etiqueta y el asistente respeta.
+ */
+const EXCLUDED_TAGS = new Set([
+  "cliente", "proveedor", "interno", "no-asistente", "renovamax",
+]);
 
 export interface SalesAssistantResult {
   handled: boolean;
@@ -95,9 +112,12 @@ export async function runSalesAssistant(
     .maybeSingle();
   if (!contact) return { handled: false, detail: "contacto no encontrado" };
 
-  // Clientes existentes: el recepcionista comercial no interviene.
-  if ((contact.tags ?? []).includes("cliente")) {
-    return { handled: false, detail: "cliente existente — sin venta automática" };
+  // Exclusión permanente: clientes existentes, proveedores, conversaciones
+  // internas y contactos de otras empresas (Renovamax…) nunca son saludados.
+  const excludedTag = (contact.tags ?? []).find((t) => EXCLUDED_TAGS.has(String(t).toLowerCase()));
+  if (excludedTag) {
+    await log("info", `Trigger bloqueado — contacto excluido (tag "${excludedTag}")`);
+    return { handled: false, detail: `excluido:${excludedTag}` };
   }
 
   const custom = (contact.custom_fields ?? {}) as Record<string, unknown> & Funnel;
@@ -156,10 +176,22 @@ export async function runSalesAssistant(
   }
   if (state === "snoozed") { await saveFunnel({ funnel_state: undefined, snooze_until: undefined }); state = null; }
 
+  // ── Guarda permanente del saludo inicial ───────────────────────────────────
+  // Si este contacto ya fue saludado (assistant_initialized=true) pero perdió el
+  // estado (conversación reabierta, historial sincronizado, trigger repetido),
+  // NUNCA se reenvía el saludo. Sólo se permite avanzar si el texto ya indica un
+  // negocio concreto (progreso real, no un re-saludo).
+  if (!state && custom.assistant_initialized) {
+    const biz = classifyBusiness(text);
+    if (biz) return enterBusiness(biz);
+    await log("info", "Saludo inicial bloqueado — assistant_initialized=true (no se re-saluda)");
+    return { handled: false, detail: "welcome:bloqueado-ya-inicializado" };
+  }
+
   // ── Lead de Transforma Fit Coach (webhook): contexto online directo ────────
   if (!state && contact.source === "transforma-fit-coach") {
     context = "online";
-    await saveFunnel({ funnel_context: "online", funnel_state: "awaiting_channel" });
+    await saveFunnel({ funnel_context: "online", funnel_state: "awaiting_channel", assistant_initialized: true });
     await reply(COPY.onlineGreeting(firstName || "¡bienvenido/a!"));
     await addTags(["cliente-potencial", "funnel-online"]);
     await log("info", "Lead Transforma → valoración online (canal)");
@@ -171,7 +203,7 @@ export async function runSalesAssistant(
     const biz = classifyBusiness(text);
     if (!biz) {
       await reply(cfg.welcome);
-      await saveFunnel({ funnel_state: "reception" });
+      await saveFunnel({ funnel_state: "reception", assistant_initialized: true });
       await addTags(["cliente-potencial", "lead-nuevo"]);
       await log("info", "Recepción — saludo doble negocio");
       return { handled: true, detail: "reception:saludo" };
@@ -352,7 +384,7 @@ export async function runSalesAssistant(
   async function enterBusiness(biz: BusinessContext): Promise<SalesAssistantResult> {
     context = biz;
     if (biz === "gym") {
-      await saveFunnel({ funnel_context: "gym" });
+      await saveFunnel({ funnel_context: "gym", assistant_initialized: true });
       await addTags(["cliente-potencial", "contexto-gimnasio"]);
       // Atajo: si ya pide clase de prueba, no pasamos por el menú.
       if (detectTrialIntent(text)) { await log("info", "Contexto → GIMNASIO (clase de prueba directa)"); return gymTrial(); }
@@ -361,7 +393,7 @@ export async function runSalesAssistant(
       await log("info", "Contexto → GIMNASIO");
       return { handled: true, detail: "gym:menu" };
     }
-    await saveFunnel({ funnel_context: "online" });
+    await saveFunnel({ funnel_context: "online", assistant_initialized: true });
     await addTags(["cliente-potencial", "contexto-online"]);
     // Atajo: si ya pide valoración, saltamos directo a la elección de canal.
     if (detectValoracionIntent(text)) { await log("info", "Contexto → ONLINE (valoración directa)"); return onlineOfferChannel(); }

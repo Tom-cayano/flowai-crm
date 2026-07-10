@@ -34,6 +34,7 @@ const BYPASS_PREFIXES = [
   "/api/billing/webhooks", // Stripe webhook — usa firma, no sesión
   "/api/sales/",         // puente del asistente comercial — usa secreto compartido
   "/api/instagram/drain", // drenador de DMs de IG (worker congelado) — usa secreto compartido
+  "/api/instagram/app-audit", // diagnóstico read-only de la app de Meta — usa secreto compartido
   "/api/ops",            // health checks internos
   "/_next/",
   "/favicon",

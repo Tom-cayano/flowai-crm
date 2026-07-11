@@ -173,6 +173,9 @@ export const COPY = {
 
   fallbackNudge:
     "Para avanzar rápido, respóndeme con el número de la opción que prefieras 😊",
+
+  handoffToHuman:
+    "¡Gracias por tu mensaje! 🙌 En un momento te atiende una persona del equipo para ayudarte con lo que necesitas.",
 } as const;
 
 // ─── V2: menú de WhatsApp directo, planes y recuperación ─────────────────────

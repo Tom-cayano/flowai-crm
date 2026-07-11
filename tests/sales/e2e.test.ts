@@ -142,3 +142,28 @@ test("E2E CASO 7 · contacto excluido (cliente/proveedor/Renovamax) nunca recibe
     assert.equal(r.out, "", `tag ${tag} no debe enviar nada`);
   }
 });
+
+test("E2E CASO 8 · texto libre NO reinicia el menú; escala a humano y calla", opts, async () => {
+  await reset();
+  await say("Hola");
+  let r = await say("1");                 // entra a gimnasio → menú (una vez)
+  assert.equal(r.ctx, "gym");
+  assert.ok(/Entrenamiento grupal/.test(r.out), "el menú se muestra al entrar");
+
+  // 1er texto libre no reconocido → empujón SUAVE, sin repetir el menú completo
+  r = await say("He visto unas clases de boxeo");
+  assert.equal(r.detail, "gym:reask-suave");
+  assert.ok(!/Entrenamiento grupal/.test(r.out), "NO debe reenviar el menú completo");
+
+  // 2º texto libre → escala a una persona (no repite menú)
+  r = await say("se llama élite");
+  assert.equal(r.detail, "gym:escalado-humano");
+  assert.ok(!/Entrenamiento grupal/.test(r.out), "NO reenvía el menú");
+  assert.match(r.out, /te atiende una persona/i);
+
+  // 3er mensaje → el bot permanece EN SILENCIO (cedido a humano)
+  r = await say("vale gracias");
+  assert.equal(r.handled, false);
+  assert.equal(r.detail, "silencio:escalado-humano");
+  assert.equal(r.out, "", "el bot no responde tras ceder a un humano");
+});

@@ -70,6 +70,15 @@ interface Funnel {
    * conversación antigua, al sincronizar historial o ante triggers repetidos).
    */
   assistant_initialized?: boolean;
+  /** Nº de veces que se ha re-preguntado el menú ante texto libre no reconocido. */
+  menu_reasks?: number;
+  /**
+   * true cuando el asistente cede la conversación a una persona (p. ej. el
+   * cliente escribe texto libre que no interpreta). Mientras sea true, el bot
+   * NO vuelve a responder en esa conversación (evita el bucle de menú y no pisa
+   * al operador).
+   */
+  escalated_to_human?: boolean;
 }
 
 /**
@@ -157,6 +166,13 @@ export async function runSalesAssistant(
 
   let state   = custom.funnel_state ?? null;
   let context = custom.funnel_context ?? null;
+
+  // ── Traspaso a humano: si ya se cedió la conversación, el bot NO responde ───
+  //    (evita el bucle de menú ante texto libre y no pisa al operador).
+  if (custom.escalated_to_human) {
+    await log("info", "Conversación cedida a humano — el asistente permanece en silencio");
+    return { handled: false, detail: "silencio:escalado-humano" };
+  }
 
   // ── Recuperación de leads (no insistir) ────────────────────────────────────
   if (state !== "booked" && state !== "snooze_ask" && detectSnooze(text)) {
@@ -271,11 +287,28 @@ export async function runSalesAssistant(
         if (c === 2) { await reply(GYM_MENU); await saveFunnel({ funnel_state: "gym_menu" }); return { handled: true, detail: "gym:menu" }; }
         c = null;
       }
-      if (c === null) { await reply(COPY.fallbackNudge + "\n\n" + GYM_MENU); await saveFunnel({ funnel_state: "gym_menu" }); return { handled: true, detail: "gym:reask" }; }
+      if (c === null) {
+        // Texto libre no reconocido. El menú completo se envía UNA sola vez (al
+        // entrar en gym). Aquí NO se repite: 1er texto libre → un empujón suave;
+        // 2º+ → se cede a una persona y el bot calla (no bucle de menú).
+        const reasks = (custom.menu_reasks ?? 0) + 1;
+        if (reasks === 1) {
+          await reply(COPY.fallbackNudge);
+          await saveFunnel({ funnel_state: "gym_menu", menu_reasks: reasks });
+          return { handled: true, detail: "gym:reask-suave" };
+        }
+        await addTags(["seguimiento-manual", "atencion-humana"]);
+        await note(`💬 El cliente escribe texto libre que el asistente no interpreta ("${text}"). Requiere atención de una persona.`);
+        if (ctx.conversationId) await db.from("conversations").update({ status: "pending" }).eq("id", ctx.conversationId);
+        await reply(COPY.handoffToHuman);
+        await saveFunnel({ funnel_state: "gym_menu", menu_reasks: reasks, escalated_to_human: true });
+        await log("info", "Gym: texto libre repetido → escalado a persona, bot en silencio");
+        return { handled: true, detail: "gym:escalado-humano" };
+      }
       if (c >= 1 && c <= 3) {
         await reply(GYM_PLAN_DETAILS[c]!);
         await reply(GYM_AFTER_PLAN);
-        await saveFunnel({ funnel_state: "gym_after_plan" });
+        await saveFunnel({ funnel_state: "gym_after_plan", menu_reasks: 0 });
         await log("info", `Gym → plan ${c}`);
         return { handled: true, detail: `gym:plan-${c}` };
       }

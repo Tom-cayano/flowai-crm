@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
   // 2. Conversación WhatsApp más reciente del contacto
   const { data: conv } = await db
     .from("conversations")
-    .select("id")
+    .select("id, assigned_to, status")
     .eq("user_id", userId)
     .eq("contact_id", contact.id)
     .order("created_at", { ascending: false })
@@ -92,6 +92,35 @@ export async function POST(req: NextRequest) {
   if (lastInboundAt && ageMs > MAX_AGE_MS) {
     console.warn("[sales-trigger] BLOCK", { reason: "stale-inbound", phone, userId, ageMs, lastInboundAt });
     return NextResponse.json({ ok: false, blocked: "stale-inbound", ageMs }, { status: 200 });
+  }
+
+  // 3c. GUARDA DE TRASPASO A HUMANO — si un operador humano ya está atendiendo la
+  //     conversación, el bot NO responde (evita interrumpir a la persona y el
+  //     spam de menús). Señales de que hay un humano al mando:
+  //       • la conversación está ASIGNADA a un agente (assigned_to != null), o
+  //       • el ÚLTIMO mensaje saliente fue MANUAL: sender="agent" con un
+  //         agent_name que NO es el del bot. El asistente firma siempre como
+  //         "Recepción"/"FlowAI"; un mensaje manual del operador va con
+  //         agent_name = null. Ante la duda (agent_name desconocido) se asume
+  //         humano y se pausa — nunca se pisa a una persona.
+  const BOT_AGENT_NAMES = new Set(["Recepción", "Recepcion", "FlowAI"]);
+  if (conv) {
+    if (conv.assigned_to) {
+      console.warn("[sales-trigger] BLOCK", { reason: "human-assigned", phone, userId, assignedTo: conv.assigned_to });
+      return NextResponse.json({ ok: false, blocked: "human-assigned" }, { status: 200 });
+    }
+    const { data: lastOut } = await db
+      .from("messages")
+      .select("agent_name, created_at")
+      .eq("conversation_id", conv.id)
+      .eq("sender", "agent")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (lastOut && !BOT_AGENT_NAMES.has(lastOut.agent_name ?? "")) {
+      console.warn("[sales-trigger] BLOCK", { reason: "human-handoff", phone, userId, lastManualAt: lastOut.created_at, agentName: lastOut.agent_name });
+      return NextResponse.json({ ok: false, blocked: "human-handoff" }, { status: 200 });
+    }
   }
 
   // 4. Credenciales de la instancia WhatsApp abierta del usuario (per-instancia)

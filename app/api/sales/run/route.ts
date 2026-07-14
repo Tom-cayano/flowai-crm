@@ -67,10 +67,11 @@ export async function POST(req: NextRequest) {
   //    y es reciente. Lo usamos como referencia de frescura.
   let incomingText  = (body.text ?? "").trim();
   let lastInboundAt: string | null = null;
+  let inboundExternalId: string | null = null;
   if (conv) {
     const { data: lastIn } = await db
       .from("messages")
-      .select("content, created_at")
+      .select("content, created_at, external_id, id")
       .eq("conversation_id", conv.id)
       .eq("sender", "contact")
       .order("created_at", { ascending: false })
@@ -78,12 +79,15 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
     if (!incomingText) incomingText = (lastIn?.content ?? "").trim();
     lastInboundAt = lastIn?.created_at ?? null;
+    // Clave idempotente: external_id (estable ante reintentos); si falta, el id de la fila.
+    inboundExternalId = lastIn?.external_id ?? lastIn?.id ?? null;
   }
 
-  // 3b. FILTRO CENTRAL ÚNICO — decide si el asistente puede intervenir. Bloquea
-  //     (sin responder) clientes, familiares, internos, proveedores, mensajes
-  //     antiguos, conversaciones atendidas por un humano y reservas activas.
-  //     Toda la lógica vive en lib/sales/gate.ts (no hay guardas repartidas).
+  // 3b. FILTRO CENTRAL ÚNICO — decide si el asistente puede intervenir y reserva
+  //     la respuesta (idempotencia). Bloquea clientes, familiares, internos,
+  //     proveedores, mensajes antiguos, conversaciones con humano, IA
+  //     desactivada, reservas activas y mensajes ya respondidos. Toda la lógica
+  //     vive en lib/sales/gate.ts (no hay guardas repartidas).
   const gate = await shouldStartSalesAssistant(db, {
     contactId:      contact.id,
     tags:           contact.tags,
@@ -91,6 +95,7 @@ export async function POST(req: NextRequest) {
     conversationId: conv?.id ?? null,
     incomingText,
     lastInboundAt,
+    inboundExternalId,
   });
   if (!gate.start) {
     console.warn("[sales-trigger] BLOCK", { reason: gate.reason, detail: gate.detail, phone, userId });

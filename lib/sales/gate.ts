@@ -121,15 +121,21 @@ export async function shouldStartSalesAssistant(db: DB, input: GateInput): Promi
 
     const { data: lastOut } = await db
       .from("messages")
-      .select("agent_name")
+      .select("agent_name, created_at")
       .eq("conversation_id", input.conversationId)
       .eq("sender", "agent")
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
     if (lastOut && !BOT_AGENT_NAMES.has(lastOut.agent_name ?? "")) {
-      await persist({ ia_disabled: true });          // humano escribió → IA off permanente
-      return { start: false, reason: "human-handoff" };
+      // Solo desactiva si el mensaje manual es POSTERIOR a la última
+      // reactivación manual (si no, la reactivación se desharía al instante).
+      const reactivatedAt = custom.ia_reactivated_at ? new Date(String(custom.ia_reactivated_at)).getTime() : 0;
+      const manualAt      = new Date(lastOut.created_at).getTime();
+      if (manualAt > reactivatedAt) {
+        await persist({ ia_disabled: true });        // humano escribió → IA off permanente
+        return { start: false, reason: "human-handoff" };
+      }
     }
 
     // 6. Conversación cerrada / resuelta / spam.
@@ -175,5 +181,8 @@ export async function reactivateSalesAssistant(db: DB, contactId: string): Promi
   const custom = (data?.custom_fields ?? {}) as Record<string, unknown>;
   delete custom.ia_disabled;
   delete custom.escalated_to_human;
+  // Marca de reactivación: los mensajes manuales ANTERIORES ya no re-desactivan
+  // la IA (solo un mensaje humano posterior a este instante lo hará).
+  custom.ia_reactivated_at = new Date().toISOString();
   await db.from("contacts").update({ custom_fields: custom as Json }).eq("id", contactId);
 }

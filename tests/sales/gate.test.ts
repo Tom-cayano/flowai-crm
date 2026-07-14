@@ -93,9 +93,17 @@ test("conversación asignada a un agente → BLOQUEA human-assigned", async () =
 });
 
 test("último saliente MANUAL (agent_name null) → BLOQUEA human-handoff", async () => {
-  const db = mockDb({ conversations: { assigned_to: null }, messages: { agent_name: null } });
+  const db = mockDb({ conversations: { assigned_to: null }, messages: { agent_name: null, created_at: new Date().toISOString() } });
   const d = await shouldStartSalesAssistant(db, inp());
   assert.equal(d.reason, "human-handoff");
+});
+
+test("reactivada: mensaje manual ANTERIOR a la reactivación NO desactiva", async () => {
+  const manual = new Date(Date.now() - 60_000).toISOString();          // manual hace 1 min
+  const reactivated = new Date().toISOString();                        // reactivada ahora
+  const db = mockDb({ conversations: { assigned_to: null }, messages: { agent_name: null, created_at: manual } });
+  const d = await shouldStartSalesAssistant(db, inp({ customFields: { ia_reactivated_at: reactivated } }));
+  assert.equal(d.start, true, "tras reactivar, un manual previo no re-desactiva");
 });
 
 test("último saliente del BOT (Recepción) → NO bloquea", async () => {

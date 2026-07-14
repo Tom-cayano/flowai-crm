@@ -14,6 +14,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { runSalesAssistant } from "@/lib/sales/assistant";
+import { shouldStartSalesAssistant } from "@/lib/sales/gate";
 import type { ExecutionContext } from "@/types/automation";
 
 export const runtime = "nodejs";
@@ -39,7 +40,7 @@ export async function POST(req: NextRequest) {
   // 1. Contacto por teléfono (dígitos normalizados) en el ámbito del usuario
   const { data: contact } = await db
     .from("contacts")
-    .select("id")
+    .select("id, tags, custom_fields")
     .eq("user_id", userId)
     .or(`phone.eq.${phone},whatsapp.eq.${phone}`)
     .order("created_at", { ascending: true })
@@ -79,49 +80,23 @@ export async function POST(req: NextRequest) {
     lastInboundAt = lastIn?.created_at ?? null;
   }
 
-  // 3b. GUARDA DEL TRIGGER — el asistente sólo debe activarse ante un mensaje
-  //     entrante REAL y RECIENTE. Bloquea (sin responder): apertura/lectura de
-  //     un chat (no hay entrante), reapertura de conversaciones antiguas,
-  //     sincronización de historial y triggers repetidos/espurios.
-  const MAX_AGE_MS = Number(process.env.SALES_TRIGGER_MAX_AGE_MS ?? 900_000); // 15 min
-  if (!incomingText && !lastInboundAt) {
-    console.warn("[sales-trigger] BLOCK", { reason: "no-inbound-message", phone, userId });
-    return NextResponse.json({ ok: false, blocked: "no-inbound-message" }, { status: 200 });
+  // 3b. FILTRO CENTRAL ÚNICO — decide si el asistente puede intervenir. Bloquea
+  //     (sin responder) clientes, familiares, internos, proveedores, mensajes
+  //     antiguos, conversaciones atendidas por un humano y reservas activas.
+  //     Toda la lógica vive en lib/sales/gate.ts (no hay guardas repartidas).
+  const gate = await shouldStartSalesAssistant(db, {
+    contactId:      contact.id,
+    tags:           contact.tags,
+    customFields:   contact.custom_fields as Record<string, unknown> | null,
+    conversationId: conv?.id ?? null,
+    incomingText,
+    lastInboundAt,
+  });
+  if (!gate.start) {
+    console.warn("[sales-trigger] BLOCK", { reason: gate.reason, detail: gate.detail, phone, userId });
+    return NextResponse.json({ ok: false, blocked: gate.reason, detail: gate.detail ?? null }, { status: 200 });
   }
-  const ageMs = lastInboundAt ? Date.now() - new Date(lastInboundAt).getTime() : 0;
-  if (lastInboundAt && ageMs > MAX_AGE_MS) {
-    console.warn("[sales-trigger] BLOCK", { reason: "stale-inbound", phone, userId, ageMs, lastInboundAt });
-    return NextResponse.json({ ok: false, blocked: "stale-inbound", ageMs }, { status: 200 });
-  }
-
-  // 3c. GUARDA DE TRASPASO A HUMANO — si un operador humano ya está atendiendo la
-  //     conversación, el bot NO responde (evita interrumpir a la persona y el
-  //     spam de menús). Señales de que hay un humano al mando:
-  //       • la conversación está ASIGNADA a un agente (assigned_to != null), o
-  //       • el ÚLTIMO mensaje saliente fue MANUAL: sender="agent" con un
-  //         agent_name que NO es el del bot. El asistente firma siempre como
-  //         "Recepción"/"FlowAI"; un mensaje manual del operador va con
-  //         agent_name = null. Ante la duda (agent_name desconocido) se asume
-  //         humano y se pausa — nunca se pisa a una persona.
-  const BOT_AGENT_NAMES = new Set(["Recepción", "Recepcion", "FlowAI"]);
-  if (conv) {
-    if (conv.assigned_to) {
-      console.warn("[sales-trigger] BLOCK", { reason: "human-assigned", phone, userId, assignedTo: conv.assigned_to });
-      return NextResponse.json({ ok: false, blocked: "human-assigned" }, { status: 200 });
-    }
-    const { data: lastOut } = await db
-      .from("messages")
-      .select("agent_name, created_at")
-      .eq("conversation_id", conv.id)
-      .eq("sender", "agent")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (lastOut && !BOT_AGENT_NAMES.has(lastOut.agent_name ?? "")) {
-      console.warn("[sales-trigger] BLOCK", { reason: "human-handoff", phone, userId, lastManualAt: lastOut.created_at, agentName: lastOut.agent_name });
-      return NextResponse.json({ ok: false, blocked: "human-handoff" }, { status: 200 });
-    }
-  }
+  console.log("[sales-trigger] GATE ok", { reason: gate.reason, phone, userId });
 
   // 4. Credenciales de la instancia WhatsApp abierta del usuario (per-instancia)
   const { data: inst } = await db
@@ -151,7 +126,7 @@ export async function POST(req: NextRequest) {
 
   // 5. Ejecutar el asistente (encola la respuesta en wpp-outbound → worker → Evolution)
   console.log("[sales-trigger] FIRE", {
-    phone, userId, conversationId: conv?.id ?? null, ageMs,
+    phone, userId, conversationId: conv?.id ?? null, gate: gate.reason,
     textPreview: incomingText.slice(0, 60),
   });
   const result = await runSalesAssistant(ctx, async (level, message) => {

@@ -11,7 +11,7 @@
     "worker:dev": "tsx watch --tsconfig workers/tsconfig.json workers/worker.ts",
     "typecheck": "tsc --noEmit",
     "typecheck:worker": "tsc --project workers/tsconfig.json --noEmit",
-    "test": "tsx --test tests/sales/router.test.ts tests/sales/contract.test.ts tests/instagram/reply-logic.test.ts tests/instagram/contract.test.ts",
+    "test": "tsx --test tests/sales/router.test.ts tests/sales/contract.test.ts tests/sales/gate.test.ts tests/instagram/reply-logic.test.ts tests/instagram/contract.test.ts",
     "test:e2e": "tsx --test tests/sales/e2e.test.ts",
     "test:ig": "tsx --test tests/instagram/reply-logic.test.ts tests/instagram/contract.test.ts",
     "test:ig:e2e": "tsx --test tests/instagram/e2e.test.ts",

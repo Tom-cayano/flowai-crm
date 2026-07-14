@@ -138,7 +138,7 @@ test("E2E CASO 7 · contacto excluido (cliente/proveedor/Renovamax) nunca recibe
     await db.from("contacts").update({ custom_fields: {}, tags: [tag] }).eq("id", CID);
     const r = await say("Hola, quiero información");
     assert.equal(r.handled, false, `tag ${tag} debe bloquear`);
-    assert.equal(r.detail, `excluido:${tag}`);
+    assert.equal(r.detail, `gate:excluded-tag:${tag}`);
     assert.equal(r.out, "", `tag ${tag} no debe enviar nada`);
   }
 });
@@ -161,9 +161,9 @@ test("E2E CASO 8 · texto libre NO reinicia el menú; escala a humano y calla", 
   assert.ok(!/Entrenamiento grupal/.test(r.out), "NO reenvía el menú");
   assert.match(r.out, /te atiende una persona/i);
 
-  // 3er mensaje → el bot permanece EN SILENCIO (cedido a humano)
+  // 3er mensaje → el bot permanece EN SILENCIO (cedido a humano, vía filtro central)
   r = await say("vale gracias");
   assert.equal(r.handled, false);
-  assert.equal(r.detail, "silencio:escalado-humano");
+  assert.equal(r.detail, "gate:escalated-to-human");
   assert.equal(r.out, "", "el bot no responde tras ceder a un humano");
 });

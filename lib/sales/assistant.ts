@@ -46,6 +46,7 @@ import {
 import { getFreeSlots, formatSlot } from "./slots";
 import { createCalendarEvent } from "./google-calendar";
 import { getSalesConfig, applyConfigToClose } from "./config";
+import { shouldStartSalesAssistant } from "./gate";
 
 type Logger = (level: "debug" | "info" | "warn" | "error", message: string) => Promise<void>;
 
@@ -81,16 +82,6 @@ interface Funnel {
   escalated_to_human?: boolean;
 }
 
-/**
- * Contactos que el recepcionista comercial NUNCA debe saludar, aunque el
- * trigger se dispare: clientes existentes, proveedores, conversaciones internas
- * y cualquier contacto de otra empresa (p. ej. Renovamax). La detección es por
- * etiqueta del contacto — el equipo etiqueta y el asistente respeta.
- */
-const EXCLUDED_TAGS = new Set([
-  "cliente", "proveedor", "interno", "no-asistente", "renovamax",
-]);
-
 export interface SalesAssistantResult {
   handled: boolean;
   detail:  string;
@@ -121,17 +112,26 @@ export async function runSalesAssistant(
     .maybeSingle();
   if (!contact) return { handled: false, detail: "contacto no encontrado" };
 
-  // Exclusión permanente: clientes existentes, proveedores, conversaciones
-  // internas y contactos de otras empresas (Renovamax…) nunca son saludados.
-  const excludedTag = (contact.tags ?? []).find((t) => EXCLUDED_TAGS.has(String(t).toLowerCase()));
-  if (excludedTag) {
-    await log("info", `Trigger bloqueado — contacto excluido (tag "${excludedTag}")`);
-    return { handled: false, detail: `excluido:${excludedTag}` };
-  }
-
   const custom = (contact.custom_fields ?? {}) as Record<string, unknown> & Funnel;
   const text   = ctx.incomingText ?? "";
   const firstName = (contact.name ?? "").trim().split(/\s+/)[0] || "";
+
+  // ── FILTRO CENTRAL ÚNICO ────────────────────────────────────────────────────
+  // Misma función que usa el puente. El asistente NO interviene con clientes,
+  // familiares, internos, proveedores, conversaciones atendidas por un humano,
+  // ya cedidas a una persona o con una reserva activa. (La frescura la comprueba
+  // el puente; aquí es defensa para llamadas directas/tests.)
+  const gate = await shouldStartSalesAssistant(db, {
+    contactId:      contact.id,
+    tags:           contact.tags,
+    customFields:   custom,
+    conversationId: ctx.conversationId ?? null,
+    incomingText:   text,
+  });
+  if (!gate.start) {
+    await log("info", `Filtro central: no intervenir (${gate.reason})`);
+    return { handled: false, detail: `gate:${gate.reason}${gate.detail ? ":" + gate.detail : ""}` };
+  }
 
   // Configuración editable (Supabase) con fallback a defaults del código.
   const cfg = await getSalesConfig(ctx.userId);
@@ -166,13 +166,6 @@ export async function runSalesAssistant(
 
   let state   = custom.funnel_state ?? null;
   let context = custom.funnel_context ?? null;
-
-  // ── Traspaso a humano: si ya se cedió la conversación, el bot NO responde ───
-  //    (evita el bucle de menú ante texto libre y no pisa al operador).
-  if (custom.escalated_to_human) {
-    await log("info", "Conversación cedida a humano — el asistente permanece en silencio");
-    return { handled: false, detail: "silencio:escalado-humano" };
-  }
 
   // ── Recuperación de leads (no insistir) ────────────────────────────────────
   if (state !== "booked" && state !== "snooze_ask" && detectSnooze(text)) {

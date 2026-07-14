@@ -10,6 +10,7 @@ import {
   enqueueFBOutbound,
 } from "@/lib/queue/producers";
 import { runAIReply } from "@/lib/ai/orchestrator";
+import { shouldStartSalesAssistant } from "@/lib/sales/gate";
 import { classifyIntent } from "@/lib/ai/intent-classifier";
 import { upsertLeadScore } from "@/lib/ai/lead-scorer";
 import { getAccessToken, maybeRefreshToken } from "@/lib/instagram/token-store";
@@ -189,6 +190,30 @@ export async function executeAction(
       // ── AI reply ──────────────────────────────────────────────────────────
       case "ai_reply": {
         if (!ctx.conversationId) return { ok: true };
+
+        // FILTRO CENTRAL ÚNICO — la IA general (ai_reply) tampoco puede responder
+        // a clientes, familiares, empleados, proveedores, conversaciones con un
+        // humano, IA desactivada ni mensajes duplicados. Misma puerta que el
+        // asistente comercial: NADA que envíe un mensaje se salta este filtro.
+        if (ctx.contactId) {
+          const { data: gc } = await db
+            .from("contacts")
+            .select("tags, custom_fields")
+            .eq("id", ctx.contactId)
+            .maybeSingle();
+          const gate = await shouldStartSalesAssistant(db, {
+            contactId:      ctx.contactId,
+            tags:           gc?.tags ?? null,
+            customFields:   (gc?.custom_fields ?? null) as Record<string, unknown> | null,
+            conversationId: ctx.conversationId,
+            incomingText:   ctx.incomingText ?? "",
+          });
+          if (!gate.start) {
+            await log("info", `ai_reply bloqueado por el filtro central (${gate.reason})`);
+            return { ok: true };
+          }
+        }
+
         let aiResult: Awaited<ReturnType<typeof runAIReply>>;
         try {
           aiResult = await runAIReply({
@@ -306,6 +331,89 @@ export async function executeAction(
       case "end_workflow":
         await log("info", "Workflow finalizado");
         return { ok: true };
+
+      // ── Email nativo (Resend) ─────────────────────────────────────────────
+      case "send_email": {
+        if (!ctx.contactId) return { ok: true };
+
+        const { data: contact } = await db
+          .from("contacts")
+          .select("name, email, tags, custom_fields")
+          .eq("id", ctx.contactId)
+          .maybeSingle();
+
+        if (!contact?.email) {
+          await log("info", "send_email omitido — el contacto no tiene email");
+          return { ok: true };
+        }
+
+        const custom = (contact.custom_fields ?? {}) as Record<string, unknown>;
+        const vars: Record<string, string> = {
+          nombre:   (contact.name ?? "").split(/\s+/)[0] ?? "",
+          objetivo: typeof custom.goal === "string" ? custom.goal : "",
+        };
+        for (const [k, v] of Object.entries(ctx.variables)) {
+          if (typeof v === "string" || typeof v === "number") vars[k] = String(v);
+        }
+
+        let subject  = action.subject ?? "";
+        let bodyHtml = action.bodyHtml ?? "";
+
+        if (action.templateSlug) {
+          const { data: tpl } = await db
+            .from("email_templates")
+            .select("subject, body_html")
+            .eq("user_id", ctx.userId)
+            .eq("slug", action.templateSlug)
+            .maybeSingle();
+          if (!tpl) {
+            await log("warn", `send_email: plantilla "${action.templateSlug}" no encontrada`);
+            return { ok: false, error: "template not found" };
+          }
+          subject  = tpl.subject;
+          bodyHtml = tpl.body_html;
+        }
+
+        if (action.aiGenerate) {
+          const { composeEmailWithAI } = await import("@/lib/email/ai-composer");
+          const composed = await composeEmailWithAI({
+            userId:    ctx.userId,
+            contactId: ctx.contactId,
+            purpose:   action.aiPurpose ?? "reactivar al lead y conseguir una reserva",
+          });
+          if (composed) {
+            subject  = composed.subject;
+            bodyHtml = composed.bodyHtml;
+          } else {
+            await log("warn", "send_email: la IA no pudo generar el contenido — se usa la plantilla/asunto configurados");
+          }
+        }
+
+        if (!subject || !bodyHtml) {
+          await log("warn", "send_email sin contenido (ni plantilla, ni asunto/cuerpo, ni IA)");
+          return { ok: false, error: "empty email" };
+        }
+
+        const { queueEmail } = await import("@/lib/email/send");
+        const logId = await queueEmail({
+          userId:         ctx.userId,
+          to:             contact.email,
+          subject,
+          bodyHtml,
+          vars,
+          contactId:      ctx.contactId,
+          conversationId: ctx.conversationId,
+          templateSlug:   action.templateSlug ?? null,
+          origin:         "automation",
+        });
+
+        if (!logId) {
+          await log("warn", "send_email omitido — canal email no configurado (Ajustes → Email)");
+          return { ok: true };
+        }
+        await log("info", `Email encolado a ${contact.email} — "${subject.slice(0, 60)}"`);
+        return { ok: true };
+      }
 
       // ── Asistente comercial (funnel de reservas) ──────────────────────────
       case "sales_assistant": {

@@ -75,4 +75,25 @@ test("contract · el endpoint /api/sales/run valida x-sales-secret", async () =>
   const src = await import("node:fs").then((fs) => fs.readFileSync("app/api/sales/run/route.ts", "utf8"));
   assert.ok(src.includes("x-sales-secret"), "el puente debe validar x-sales-secret");
   assert.ok(src.includes("runSalesAssistant"), "el puente debe ejecutar runSalesAssistant");
+  assert.ok(src.includes("shouldStartSalesAssistant"), "el puente debe pasar por el filtro central");
+});
+
+// ─── No-bypass: TODO emisor de respuesta pasa por el filtro central ───────────
+
+test("contract · el puente y el asistente llaman a shouldStartSalesAssistant", async () => {
+  const fs = await import("node:fs");
+  const bridge = fs.readFileSync("app/api/sales/run/route.ts", "utf8");
+  const assistant = fs.readFileSync("lib/sales/assistant.ts", "utf8");
+  assert.ok(bridge.includes("shouldStartSalesAssistant"), "puente gated");
+  assert.ok(assistant.includes("shouldStartSalesAssistant"), "asistente gated");
+});
+
+test("contract · la acción ai_reply también pasa por el filtro central", async () => {
+  const src = await import("node:fs").then((fs) => fs.readFileSync("lib/automation/action-executor.ts", "utf8"));
+  // El bloque ai_reply debe invocar el filtro ANTES de runAIReply.
+  const aiIdx = src.indexOf('case "ai_reply"');
+  const runIdx = src.indexOf("runAIReply(", aiIdx);
+  const gateIdx = src.indexOf("shouldStartSalesAssistant", aiIdx);
+  assert.ok(aiIdx >= 0 && gateIdx >= 0 && gateIdx < runIdx,
+    "ai_reply debe llamar a shouldStartSalesAssistant antes de runAIReply");
 });
